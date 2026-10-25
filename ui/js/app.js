@@ -138,6 +138,7 @@ export function open(url, { newTab: inNew, background, typed } = {}) {
 
 /** Show an image board link in Board Roamer; if that is not possible, open it here after all. */
 const handing = new Map();
+const stay = new Set(); // board addresses that Board Roamer could not take: they stay in the browser
 export function handOff(url, { inNew, silent } = {}) {
   handing.set(url, { inNew });
   send('boardroamer', { url, path: S.settings.boardPath || '' });
@@ -147,6 +148,7 @@ on('boardresult', (m) => {
   const h_ = handing.get(m.url);
   handing.delete(m.url);
   if (!h_ || m.ok) return;
+  stay.add(m.url);
   const here = () => (h_.inNew ? newTab(m.url) : go(active(), m.url, { typed: true }));
   const why = {
     missing: 'Board Roamer isn’t installed here, or Web Roamer can’t find it. Opened on the site instead.',
@@ -2017,6 +2019,13 @@ on('wstate', (m) => {
   if (!m.fs && pageFs != null) (fsByPage = false), leavePageFs();
   requestAnimationFrame(layout);
 });
+/** A page of a supported image board was reached by a link, a redirect or a bookmark: Board Roamer takes over and the tab stays where it was. */
+function autoHand(t, before) {
+  if (S.settings.boards !== 'auto' || stay.has(t.url) || handing.has(t.url) || !B.wants(t.url) || t.id !== activeId) return;
+  handOff(t.url);
+  if (/^https?:/i.test(before) && !B.wants(before)) send('back', { id: t.id });
+  else closeTab(t.id, { quiet: true });
+}
 on('tab', (m) => {
   const t = byId(m.id);
   if (!t || !t.live) return;
@@ -2027,6 +2036,7 @@ on('tab', (m) => {
     t.url = m.url;
     if (hostOf(before) !== hostOf(t.url)) siteZoom(t);
     onSearch(t);
+    autoHand(t, before);
   }
   if (m.title != null) {
     t.title = m.title;

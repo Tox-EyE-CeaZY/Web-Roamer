@@ -159,7 +159,7 @@ export function settingsPage(api) {
       tgl('suggestions', 'Search suggestions', 'Ask the search engine for suggestions while you type (it sees what you type)'),
       tgl('instant', 'Instant answers', 'On the start page, show a summary or a sum while you type. The summaries come from DuckDuckGo, whatever your engine is.'),
       tgl('glide', 'Glide into the address bar', 'The start page’s search box floats up to the address bar when you start typing'),
-      row('Image boards', 'A search for e621, Danbooru, Gelbooru, Safebooru or Derpibooru typed in the address bar can open in Board Roamer instead', seg('boards', [['auto', 'Open in Board Roamer'], ['chip', 'Only with the button'], ['off', 'Off']]), 'e621 booru'),
+      row('Image boards', 'Posts, searches and pools on e621, Danbooru, Gelbooru, Safebooru or Derpibooru open in Board Roamer instead, whether you type them, click a link or follow a bookmark', seg('boards', [['auto', 'Open in Board Roamer'], ['chip', 'Only with the button'], ['off', 'Off']]), 'e621 booru'),
       row('Board Roamer’s location', 'Only if Web Roamer can’t find it by itself', text('boardPath', 'C:\\…\\board-roamer.exe'))),
     sec('tabs', 'Tabs & groups', 'group',
       tgl('restoreTabs', 'Reopen tabs', 'Bring back the tabs and groups you had open last time'),
