@@ -22,7 +22,7 @@ function applyLook() {
   root.classList.toggle('no-topo', !S.settings.topo);
   root.classList.toggle('no-grain', !S.settings.grain);
   root.classList.toggle('framed', !!S.settings.frame);
-  root.classList.toggle('bm-on', !!S.settings.bookmarksBar);
+  root.dataset.bmbar = S.settings.bookmarksBar;
 }
 applyLook();
 
@@ -113,6 +113,7 @@ function present(focusPage = false) {
   const internal = isInternal(t.url);
   send('show', { id: internal || !t.live ? null : t.id, focus: focusPage || internal });
   root.classList.toggle('on-internal', internal);
+  root.classList.toggle('on-start', t.url === 'roamer:start');
   const inner = $('#inner');
   if (internal) renderPage(inner, internalName(t.url), api);
   else inner.replaceChildren();
@@ -471,18 +472,30 @@ export function focusAddress(text) {
 
 // ------------------------------------------------------------ bookmarks bar
 const bmbar = $('#bmbar');
+// Ctrl+Shift+B: hidden ↔ shown (on every page)
+const toggleBar = () => S.setSetting('bookmarksBar', S.settings.bookmarksBar === 'never' ? 'always' : 'never');
+const barChoices = () => [
+  { header: 'Bookmarks bar' },
+  ...[['always', 'Show on every page'], ['start', 'Only on the start page'], ['never', 'Hide']].map(([v, label]) =>
+    ({ label, checked: S.settings.bookmarksBar === v, kbd: v === 'never' ? 'Ctrl+Shift+B' : null, run: () => S.setSetting('bookmarksBar', v) })),
+];
+bmbar.addEventListener('contextmenu', (e) => {
+  if (e.target.closest('.bm')) return;
+  e.preventDefault();
+  showMenu(barChoices(), e.clientX, e.clientY);
+});
 function paintBookmarksBar() {
   bmbar.replaceChildren(
     ...S.bookmarks.map((b) => h('a', {
       class: 'bm', href: b.url, title: `${b.title}\n${b.url}`, draggable: 'false',
       onclick: (e) => (e.preventDefault(), open(b.url, { newTab: e.ctrlKey || e.metaKey })),
       onauxclick: (e) => e.button === 1 && (e.preventDefault(), open(b.url, { background: true })),
-      oncontextmenu: (e) => (e.preventDefault(), bookmarkMenu(b, e.clientX, e.clientY)),
+      oncontextmenu: (e) => (e.preventDefault(), bookmarkMenu(b, e.clientX, e.clientY, true)),
     }, h('span', {}, favicon(b.icon, 14, b.title), h('b', {}, b.title || hostOf(b.url))))),
     !S.bookmarks.length ? h('span', { class: 'bm-empty' }, 'Bookmarks you add with the star (Ctrl+D) show up here') : null,
   );
 }
-export function bookmarkMenu(b, x, y) {
+export function bookmarkMenu(b, x, y, fromBar) {
   showMenu([
     { header: b.title || b.url },
     { label: 'Open', icon: 'go', run: () => open(b.url) },
@@ -491,6 +504,8 @@ export function bookmarkMenu(b, x, y) {
     { label: 'Edit…', icon: 'edit', run: () => editBookmark(b) },
     { label: 'Copy address', icon: 'link', run: () => navigator.clipboard?.writeText(b.url) },
     { label: 'Delete', icon: 'trash', danger: true, run: () => deleteBookmark(b) },
+    fromBar && { sep: true },
+    fromBar && { label: 'Hide bookmarks bar', icon: 'eye', kbd: 'Ctrl+Shift+B', run: () => S.setSetting('bookmarksBar', 'never') },
   ], x, y);
 }
 export async function editBookmark(b) {
@@ -593,7 +608,7 @@ function mainMenu(anchor) {
     { label: 'Bookmarks', icon: 'bookmarks', run: () => openInternal('bookmarks') },
     { label: 'History', icon: 'history', kbd: 'Ctrl+H', run: () => openInternal('history') },
     { label: 'Downloads', icon: 'download', kbd: 'Ctrl+J', run: () => openInternal('downloads') },
-    { label: 'Bookmarks bar', checked: S.settings.bookmarksBar, kbd: 'Ctrl+Shift+B', run: () => S.setSetting('bookmarksBar', !S.settings.bookmarksBar) },
+    ...barChoices(),
     { sep: true },
     { node: zoomRow },
     { label: 'Find in page…', icon: 'find', kbd: 'Ctrl+F', disabled: !web, run: openFind },
@@ -637,7 +652,7 @@ const KEYMAP = {
   'c+d': () => toggleBookmark(active()),
   'c+h': () => openInternal('history'),
   'c+j': () => openInternal('downloads'),
-  'cs+b': () => S.setSetting('bookmarksBar', !S.settings.bookmarksBar),
+  'cs+b': toggleBar,
   'c+f': openFind,
   'c+=': () => zoomStep(1),
   'c++': () => zoomStep(1),

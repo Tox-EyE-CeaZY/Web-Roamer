@@ -25,7 +25,7 @@ Because the exe isn't code-signed, SmartScreen may warn the first time: **More i
 - **Address bar** that takes an address or a search, with suggestions from your bookmarks and history.
   Six search engines to choose from (DuckDuckGo by default).
 - **Back, forward, reload / stop, home**, plus the mouse's back/forward buttons.
-- **Bookmarks**: the star (Ctrl+D), a bookmarks bar (Ctrl+Shift+B), and a page to search, edit and reorder them.
+- **Bookmarks**: the star (Ctrl+D), a bookmarks bar (shown on the start page by default; always, start page only or hidden, Ctrl+Shift+B toggles it), and a page to search, edit and reorder them.
 - **History** grouped by day, searchable, with clearing for the last hour / day / week / everything.
 - **Downloads** saved to your Downloads folder (or one you choose), with a list to open them or show them in the folder.
 - **Find in page** (Ctrl+F), **zoom** per tab (Ctrl + / − / 0), **full screen** (F11), **developer tools** (F12), print.

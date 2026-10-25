@@ -307,7 +307,7 @@ html:not(.maxed):not(.fullscreen) .rz { display: block; }
 /* ---------- bookmarks bar: the skewed route chips */
 #bmbar { display: none; align-items: center; gap: 2px; height: 36px; padding: 2px 14px 6px; overflow-x: auto; scrollbar-width: none; }
 #bmbar::-webkit-scrollbar { display: none; }
-.bm-on #bmbar { display: flex; }
+[data-bmbar='always'] #bmbar, [data-bmbar='start'].on-start #bmbar { display: flex; }
 .bm { flex: none; display: inline-flex; align-items: center; height: 26px; padding: 0 12px; margin-right: 6px; border: 1px solid var(--line2); color: var(--dim);
   transform: skewX(-14deg); transition: background .15s, color .15s, border-color .15s; max-width: 220px; }
 .bm > span { display: inline-flex; align-items: center; gap: 7px; transform: skewX(14deg); min-width: 0; font: 600 10.5px var(--f-mono); letter-spacing: .05em; white-space: nowrap; }

@@ -39,7 +39,7 @@ const DEFAULTS = {
   engine: 'duckduckgo',
   home: '', // empty = the start page
   newTab: 'start', // 'start' | 'home'
-  bookmarksBar: true,
+  bookmarksBar: 'start', // 'always' | 'start' (only on the start page) | 'never'
   restoreTabs: true,
   frame: true, // page sits in a framed well with a hard offset shadow
   topo: true,
@@ -49,6 +49,8 @@ const DEFAULTS = {
 };
 
 export const settings = { ...DEFAULTS, ...read('settings', {}) };
+// the bar used to be a plain on/off switch
+if (typeof settings.bookmarksBar === 'boolean') settings.bookmarksBar = settings.bookmarksBar ? 'always' : 'never';
 export function setSetting(k, v) {
   settings[k] = v;
   write('settings', settings);

@@ -265,7 +265,7 @@ function settingsPage(api) {
         row('Home page', 'Leave empty for the start page', text('home', 'roamer:start')),
         row('New tabs open', null, seg('newTab', [['start', 'Start page'], ['home', 'Home page']])),
         tgl('restoreTabs', 'Reopen tabs', 'Bring back the tabs you had open last time'),
-        tgl('bookmarksBar', 'Bookmarks bar', 'Ctrl+Shift+B'),
+        row('Bookmarks bar', 'Ctrl+Shift+B hides or shows it', seg('bookmarksBar', [['always', 'Always'], ['start', 'Start page'], ['never', 'Hidden']])),
         tgl('askClose', 'Ask before closing many tabs', 'Only when tabs are not reopened next time')),
       sec('Downloads',
         row('Save to', `Empty uses ${api.info?.downloads || 'your Downloads folder'}`, text('downloadsDir', api.info?.downloads || '', (v) => (api.send('dldir', { path: v }), v)))),
