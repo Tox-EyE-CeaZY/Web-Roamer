@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Site Theming SDK demo · Web Roamer</title>
+  <meta name="theme-color" content="#1b1430">
+  <meta name="roamer-theme" content='{"background":"#170f2a","accent":"#ff5fa2","pattern":"dots","font":"sans"}'>
+  <style>
+    :root { color-scheme: dark; --bg: #170f2a; --ink: #f4eefe; --ac: #ff5fa2; }
+    body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--ink); font: 16px/1.55 system-ui, sans-serif; display: grid; place-items: center; transition: background .3s; }
+    main { max-width: 640px; padding: 40px 24px; }
+    h1 { font-size: 40px; line-height: 1.05; margin: 0 0 12px; }
+    code { font: 13px ui-monospace, monospace; background: #ffffff14; padding: 2px 6px; }
+    .looks { display: flex; flex-wrap: wrap; gap: 10px; margin: 26px 0; }
+    button { font: 600 14px system-ui; padding: 10px 16px; border: 0; cursor: pointer; color: #000; background: var(--b); }
+    pre { background: #00000040; padding: 14px; overflow: auto; font: 12px/1.5 ui-monospace, monospace; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>This page dresses the browser.</h1>
+    <p id="who"></p>
+    <div class="looks">
+      <button style="--b:#ff5fa2" data-look='{"background":"#170f2a","accent":"#ff5fa2","pattern":"dots","font":"sans"}' data-bg="#170f2a">Neon night</button>
+      <button style="--b:#7cf29c" data-look='{"background":"#0c1a14","accent":"#7cf29c","pattern":"grid","shape":"square","font":"mono"}' data-bg="#0c1a14">Terminal</button>
+      <button style="--b:#e9dcc3" data-look='{"background":"#f4ecdc","accent":"#b4471c","pattern":"lines","font":"serif"}' data-bg="#f4ecdc">Paper press</button>
+      <button style="--b:#4cc9f0" data-look='{"background":"#0d1b2a","accent":"#4cc9f0","pattern":"topo","frame":false}' data-bg="#0d1b2a">Deep sea, edge to edge</button>
+      <button style="--b:#fff" data-look='{"background":"#ffffff","accent":"#ffff00","text":"#eeeeee"}' data-bg="#ffffff">Unreadable on purpose</button>
+      <button style="--b:#888" data-clear>Clear</button>
+    </div>
+    <p>The last-but-one look asks for pale text and a yellow accent on white; Web Roamer keeps it readable anyway.</p>
+    <pre id="code"></pre>
+  </main>
+  <script>
+    const who = document.getElementById('who'), code = document.getElementById('code');
+    who.innerHTML = window.roamer
+      ? 'You’re in <b>Web Roamer</b>. If the browser asks, press <b>Use this look</b> on the paintbrush in the address bar.'
+      : 'Open this page in Web Roamer to see the effect. Other browsers ignore it.';
+    for (const b of document.querySelectorAll('button')) b.onclick = () => {
+      if (b.dataset.clear) { window.roamer?.theme.clear(); code.textContent = 'roamer.theme.clear()'; return; }
+      const look = JSON.parse(b.dataset.look);
+      document.documentElement.style.setProperty('--bg', b.dataset.bg);
+      document.documentElement.style.colorScheme = b.dataset.bg === '#ffffff' || b.dataset.bg === '#f4ecdc' ? 'light' : 'dark';
+      document.body.style.color = document.documentElement.style.colorScheme === 'light' ? '#1a1a1a' : '#f4eefe';
+      window.roamer?.theme.set(look);
+      code.textContent = 'roamer.theme.set(' + JSON.stringify(look, null, 2) + ')';
+    };
+  </script>
+</body>
+</html>

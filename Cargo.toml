@@ -1,6 +1,6 @@
 [package]
 name = "web-roamer"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 description = "A stylish little web browser in the Board Roamer style"
 
@@ -9,6 +9,9 @@ tao = "0.34"
 wry = { version = "0.53", features = ["devtools"] }
 serde_json = "1"
 rust-embed = "8"
+ureq = { version = "2", default-features = false, features = ["native-tls"] }
+native-tls = "0.2"
+sha2 = "0.10"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"

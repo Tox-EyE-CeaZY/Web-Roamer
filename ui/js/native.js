@@ -14,12 +14,16 @@ export function send(t, data = {}) {
 
 // ------------------------------------------------------------ iframe stand-in (no native side)
 const frames = new Map();
-let shown = null, overlay = false;
+let shown = [], overlay = false;
 function host() {
-  return document.getElementById('page');
+  return document.body;
 }
 function fakeVis() {
-  for (const [id, f] of frames) f.style.display = !overlay && shown === id ? 'block' : 'none';
+  for (const [id, f] of frames) {
+    const r = shown.find((v) => v.id === id);
+    f.style.display = !overlay && r ? 'block' : 'none';
+    if (r) Object.assign(f.style, { left: r.x + 'px', top: r.y + 'px', width: r.w + 'px', height: r.h + 'px' });
+  }
 }
 function fake(t, d) {
   switch (t) {
@@ -52,8 +56,8 @@ function fake(t, d) {
       frames.get(d.id)?.remove();
       frames.delete(d.id);
       break;
-    case 'show':
-      shown = d.id ?? null;
+    case 'layout':
+      shown = d.views || [];
       fakeVis();
       break;
     case 'overlay':
