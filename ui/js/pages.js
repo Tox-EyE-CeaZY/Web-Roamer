@@ -1,7 +1,8 @@
-import { h, ago, clock, dayLabel, host, hash01, debounce } from './util.js';
+import { h, ago, clock, dayLabel, host, hash01, debounce, copyText } from './util.js';
 import { icon, MARK } from './icons.js';
-import { favicon, dialog, toast } from './ui.js';
+import { favicon, dialog, toast, showMenu } from './ui.js';
 import * as S from './store.js';
+import { settingsPage } from './settings.js';
 
 /** The browser's own pages (roamer:<name>). The chrome draws them in the page area; no web view is involved. */
 export const INTERNAL = {
@@ -10,18 +11,19 @@ export const INTERNAL = {
   bookmarks: { title: 'Bookmarks', icon: 'bookmarks', build: bookmarksPage },
   downloads: { title: 'Downloads', icon: 'download', build: downloadsPage },
   settings: { title: 'Settings', icon: 'settings', build: settingsPage },
+  source: { title: 'Source', icon: 'code', build: sourcePage },
 };
 
 /**
  * Build the page into `host`, or, when it is already there, let it refresh for `what` changed
  * (so a search box keeps its focus while the list under it updates).
  */
-export function renderPage(el, name, api, what) {
+export function renderPage(el, name, api, what, tab) {
   const def = INTERNAL[name] || INTERNAL.start;
-  if (el._page?.name === name && what) return el._page.update?.(what);
-  if (el._page?.name === name && !what) return;
-  const page = def.build(api);
+  if (el._page?.name === name && el._page.tab === tab) return what ? el._page.update?.(what) : undefined;
+  const page = def.build(api, tab);
   page.name = name;
+  page.tab = tab;
   el._page = page;
   el.replaceChildren(page.el);
   el.scrollTop = 0;
@@ -47,7 +49,7 @@ const linkProps = (api, url) => ({
 
 // ------------------------------------------------------------ start
 function start(api) {
-  const q = h('input', { class: 'start-q', placeholder: `Search ${S.ENGINES[S.settings.engine]?.name || 'the web'} or type an address`, spellcheck: 'false', autocomplete: 'off' });
+  const q = h('input', { class: 'start-q', placeholder: `Search ${S.engine().name} or type an address`, spellcheck: 'false', autocomplete: 'off' });
   q.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && q.value.trim()) api.open(api.resolve(q.value), { newTab: e.altKey });
   });
@@ -62,21 +64,42 @@ function start(api) {
   const greet = hour < 5 ? 'Night roaming' : hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening';
   const tiles = h('div', { class: 'tiles' });
   const recent = h('div', { class: 'recent' });
+  const groupsEl = h('div', { class: 'start-groups' });
   const paint = () => {
-    const list = S.bookmarks.length ? S.bookmarks.slice(0, 12) : S.topSites(8);
-    tilesHead.firstChild.textContent = S.bookmarks.length ? 'Bookmarks' : 'Most visited';
+    const mode = S.settings.startTiles;
+    const marks = mode === 'bookmarks' || (mode === 'auto' && S.bookmarks.length);
+    const hiddenTop = new Set(S.memo.hiddenTop || []);
+    const list = mode === 'off' ? [] : marks ? S.bookmarks.slice(0, 12) : S.topSites(12).filter((e) => !hiddenTop.has(e.url)).slice(0, 8);
+    tilesWrap.hidden = mode === 'off';
+    tilesHead.firstChild.textContent = marks ? 'Bookmarks' : 'Most visited';
     tiles.replaceChildren(
       ...list.map((b) => {
         const hue = Math.round(hash01(host(b.url)) * 360);
-        return h('a', { class: 'tile-site', style: { '--th': hue }, title: b.url, ...linkProps(api, b.url), oncontextmenu: (e) => b.id && (e.preventDefault(), api.bookmarkMenu(b, e.clientX, e.clientY)) },
+        const menu = (e) => {
+          e.preventDefault();
+          if (b.id) return api.bookmarkMenu(b, e.clientX, e.clientY);
+          showMenu([
+            { label: 'Open in new tab', icon: 'tab', run: () => api.open(b.url, { newTab: true }) },
+            { label: 'Bookmark it', icon: 'star', run: () => S.addBookmark(b) },
+            { label: 'Remove from most visited', icon: 'close', run: () => ((S.memo.hiddenTop = [...hiddenTop, b.url].slice(-100)), S.saveMemo(), paint()) },
+          ], e.clientX, e.clientY);
+        };
+        return h('a', { class: 'tile-site', style: { '--th': hue }, title: b.url, ...linkProps(api, b.url), oncontextmenu: menu },
           h('span', { class: 'ts-ic' }, favicon(b.icon, 26, b.title || host(b.url))),
           h('span', { class: 'ts-t' }, b.title || host(b.url)),
           h('span', { class: 'ts-h' }, host(b.url)));
       }),
-      !list.length ? h('p', { class: 'empty-note' }, 'Your bookmarks land here. Star a page (Ctrl+D) to pin it to this board.') : null,
+      marks || !list.length ? h('button', { class: 'tile-site tile-add', title: 'Add a bookmark', onclick: () => api.addBookmark() },
+        h('span', { class: 'ts-ic', html: icon('plus', 22) }), h('span', { class: 'ts-t' }, 'Add'), h('span', { class: 'ts-h' }, 'a bookmark')) : null,
     );
-    const seen = new Set();
-    const rec = S.history.filter((e) => !seen.has(e.url) && seen.add(e.url)).slice(0, 6);
+    const gs = api.groups();
+    groupsWrap.hidden = !gs.length;
+    groupsEl.replaceChildren(...gs.map((g) => {
+      const list = api.tabs().filter((t) => t.group === g.id);
+      return h('button', { class: 'sg-chip', style: { '--gh': api.groupColor(g) }, onclick: () => list[0] && api.activate(list[0].id) },
+        h('span', {}, g.desktop ? h('i', { html: icon('desktop', 13) }) : null, h('b', {}, g.name || 'Unnamed'), h('em', {}, list.length)));
+    }));
+    const rec = S.settings.startRecent ? S.recentVisits(6) : [];
     recent.replaceChildren(...rec.map((e) => h('a', { class: 'rc', ...linkProps(api, e.url) },
       h('span', { class: 'rc-ic' }, favicon(e.icon, 15)),
       h('span', { class: 'rc-t' }, e.title || e.url),
@@ -85,8 +108,10 @@ function start(api) {
     recentWrap.hidden = !rec.length;
   };
   const tilesHead = h('h2', { class: 'sec-t' }, '', h('button', { class: 'sec-more', onclick: () => api.openInternal('bookmarks') }, 'Manage'));
+  const tilesWrap = h('section', { class: 'start-sec' }, tilesHead, tiles);
+  const groupsWrap = h('section', { class: 'start-sec' }, h('h2', { class: 'sec-t' }, 'Tab groups', h('button', { class: 'sec-more', onclick: () => api.organize() }, '✦ Organize tabs')), groupsEl);
   const recentWrap = h('section', { class: 'start-sec' }, h('h2', { class: 'sec-t' }, 'Recently roamed', h('button', { class: 'sec-more', onclick: () => api.openInternal('history') }, 'All history')), recent);
-  const el = h('div', { class: 'start' },
+  const el = h('div', { class: 'start' + (S.settings.greeting ? '' : ' no-greet') },
     h('div', { class: 'start-hero' },
       h('span', { class: 'start-mark', html: `<svg viewBox="0 0 40 40" width="64" height="64">${MARK}</svg>` }),
       h('div', {},
@@ -94,16 +119,18 @@ function start(api) {
         h('h1', { class: 'start-h' }, `${greet}. Where to?`))),
     h('div', { class: 'field cut start-field' }, h('i', { class: 'f-ic', html: icon('search', 20) }), q,
       h('button', { class: 'go', title: 'Go', onclick: () => q.value.trim() && api.open(api.resolve(q.value)), html: icon('go', 18) })),
-    h('section', { class: 'start-sec' }, tilesHead, tiles),
-    recentWrap);
+    tilesWrap,
+    groupsWrap,
+    recentWrap,
+    h('button', { class: 'start-custom', title: 'Customize the start page', onclick: () => api.openInternal('settings', { section: 'start' }), html: icon('edit', 14) + '<span>Customize</span>' }));
   paint();
-  setTimeout(() => q.focus(), 0);
-  return { el, update: (w) => (w === 'bookmarks' || w === 'history') && paint() };
+  setTimeout(() => q.isConnected && document.activeElement?.tagName !== 'INPUT' && q.focus(), 0);
+  return { el, update: (w) => ['bookmarks', 'history', 'settings', 'groups'].includes(w) && paint() };
 }
 
 // ------------------------------------------------------------ history
 function historyPage(api) {
-  let filter = '';
+  let filter = (api.opts?.filter || '').toLowerCase();
   const list = h('div', { class: 'hist' });
   const count = h('span');
   const paint = () => {
@@ -117,7 +144,7 @@ function historyPage(api) {
       if (d !== day) out.push(h('h3', { class: 'day' }, h('span', {}, (day = d))));
       out.push(h('div', { class: 'hrow' },
         h('span', { class: 'h-time' }, clock(e.t)),
-        h('a', { class: 'h-link', title: e.url, ...linkProps(api, e.url) },
+        h('a', { class: 'h-link', title: e.url, ...linkProps(api, e.url), oncontextmenu: (ev) => (ev.preventDefault(), rowMenu(e, ev)) },
           h('span', { class: 'h-ic' }, favicon(e.icon, 16)),
           h('span', { class: 'h-t' }, e.title || e.url),
           h('span', { class: 'h-h' }, host(e.url))),
@@ -127,6 +154,16 @@ function historyPage(api) {
     if (items.length > shown.length) out.push(h('p', { class: 'empty-note' }, `Showing the latest ${shown.length} of ${items.length}. Search to narrow it down.`));
     list.replaceChildren(...out);
   };
+  const rowMenu = (e, ev) => showMenu([
+    { header: host(e.url) },
+    { label: 'Open', icon: 'go', run: () => api.open(e.url) },
+    { label: 'Open in new tab', icon: 'tab', run: () => api.open(e.url, { newTab: true }) },
+    { label: 'Copy address', icon: 'link', run: () => copyText(e.url).then(() => toast('Address copied')) },
+    { label: 'More from this site', icon: 'find', run: () => ((filter = host(e.url)), (box.querySelector('input').value = filter), paint()) },
+    { sep: true },
+    { label: 'Remove from history', icon: 'close', run: () => S.removeVisits((x) => x === e) },
+    { label: `Remove everything from ${host(e.url)}`, icon: 'trash', danger: true, run: () => S.removeVisits((x) => host(x.url) === host(e.url)) },
+  ], ev.clientX, ev.clientY);
   const clear = async () => {
     const choice = h('div', { class: 'seg' });
     const spans = [['Last hour', 3600e3], ['Today', 86400e3], ['Last 7 days', 7 * 86400e3], ['Everything', Infinity]];
@@ -139,8 +176,10 @@ function historyPage(api) {
     S.removeVisits((e) => e.t >= since);
     toast('History cleared');
   };
+  const box = searchBox('Search history', (v) => ((filter = v), paint()));
+  box.querySelector('input').value = filter;
   const el = h('div', { class: 'pg' },
-    head('HISTORY', 'Where you’ve been', count, searchBox('Search history', (v) => ((filter = v), paint())),
+    head('HISTORY', 'Where you’ve been', count, box,
       h('button', { class: 'btn danger', onclick: clear, html: icon('trash', 15) + '<span>Clear…</span>' })),
     list);
   paint();
@@ -185,6 +224,8 @@ function bookmarksPage(api) {
   };
   const el = h('div', { class: 'pg' },
     head('BOOKMARKS', 'Your waypoints', count, searchBox('Search bookmarks', (v) => ((filter = v), paint())),
+      h('button', { class: 'btn', title: 'Import bookmarks from an HTML file (Chrome, Edge, Firefox, Safari export)', onclick: () => api.importBookmarks(), html: icon('upload', 15) + '<span>Import</span>' }),
+      h('button', { class: 'btn', title: 'Save your bookmarks as an HTML file any browser can import', onclick: () => api.exportBookmarks(), html: icon('download', 15) + '<span>Export</span>' }),
       h('button', { class: 'btn primary', onclick: add, html: icon('plus', 15) + '<span>Add</span>' })),
     h('p', { class: 'pg-hint' }, 'Drag to reorder. The order here is the order of the bookmarks bar.'),
     list);
@@ -222,71 +263,28 @@ function downloadsPage(api) {
   return { el, update: (w) => w === 'downloads' && paint() };
 }
 
-// ------------------------------------------------------------ settings
-function settingsPage(api) {
-  const set = S.setSetting;
-  const tgl = (k, label, hint) => {
-    const b = h('button', { class: 'tgl' + (S.settings[k] ? ' on' : ''), role: 'switch', onclick: () => (set(k, !S.settings[k]), b.classList.toggle('on', !!S.settings[k])) }, h('i'));
-    return row(label, hint, b);
+// ------------------------------------------------------------ view source
+function sourcePage(api, tab) {
+  const d = tab?.data;
+  if (!d) return { el: h('div', { class: 'pg' }, head('SOURCE', 'Nothing to show', 'The source of a page is kept only while its tab is open.')) };
+  const lines = d.text.split('\n');
+  const big = d.text.length > 400000;
+  const esc = (x) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  // a light touch of colour: tags, attribute names and strings
+  const tint = (x) => esc(x)
+    .replace(/(&lt;\/?)([\w:-]+)/g, '$1<b class=sx-t>$2</b>')
+    .replace(/\s([\w:-]+)=(&quot;|")/g, ' <i class=sx-a>$1</i>=$2')
+    .replace(/("[^"\n]*")/g, '<u class=sx-s>$1</u>')
+    .replace(/(&lt;!--.*?-->)/g, '<s class=sx-c>$1</s>');
+  const pre = h('pre', { class: 'src' + (big ? '' : ' tinted') });
+  pre.innerHTML = lines.map((l, i) => `<span class="ln" data-n="${i + 1}">${big ? esc(l) : tint(l)}</span>`).join('\n');
+  const wrapBtn = h('button', { class: 'btn', onclick: () => pre.classList.toggle('wrap'), html: icon('layers', 15) + '<span>Wrap lines</span>' });
+  return {
+    el: h('div', { class: 'pg pg-src' },
+      head('SOURCE', host(d.url), h('span', { class: 'mono' }, `${d.url} · ${lines.length} lines`),
+        wrapBtn,
+        h('button', { class: 'btn', onclick: () => copyText(d.text).then(() => toast('Source copied')), html: icon('copy', 15) + '<span>Copy</span>' }),
+        h('button', { class: 'btn primary', onclick: () => api.open(d.url, { newTab: true }), html: icon('external', 15) + '<span>Open page</span>' })),
+      pre),
   };
-  const seg = (k, opts) => {
-    const el = h('div', { class: 'seg wrap' });
-    const paint = () => el.replaceChildren(...opts.map(([v, l]) => h('button', { class: 'seg-b' + (S.settings[k] === v ? ' on' : ''), onclick: () => (set(k, v), paint()) }, l)));
-    paint();
-    return el;
-  };
-  const text = (k, placeholder, after = (v) => v) => {
-    const i = h('input', { class: 'input mono', value: S.settings[k], placeholder });
-    i.addEventListener('change', () => set(k, after(i.value.trim())));
-    return i;
-  };
-  const row = (label, hint, ctl) => h('div', { class: 'srow' }, h('div', { class: 'sr-l' }, h('b', {}, label), hint ? h('small', {}, hint) : null), h('div', { class: 'sr-c' }, ctl));
-  const sec = (title, ...rows) => h('section', { class: 'ssec cut' }, h('h2', { class: 'ss-t' }, title), ...rows);
-
-  const themes = h('div', { class: 'themes' });
-  const paintThemes = () => themes.replaceChildren(...[['night', 'Night'], ['paper', 'Paper'], ['violet', 'Violet']].map(([v, l]) =>
-    h('button', { class: 'theme-card' + (S.settings.theme === v ? ' on' : ''), dataset: { t: v }, onclick: () => (set('theme', v), paintThemes()) }, h('i'), h('span', {}, l))));
-  paintThemes();
-  const hue = h('input', { type: 'range', min: 0, max: 360, value: S.settings.hue });
-  hue.addEventListener('input', () => document.documentElement.style.setProperty('--hue', hue.value));
-  hue.addEventListener('change', () => set('hue', +hue.value));
-
-  const el = h('div', { class: 'pg pg-settings' },
-    head('SETTINGS', 'Tune the roamer', `Web Roamer ${api.info?.version || ''}`),
-    h('div', { class: 'scols' },
-      sec('Look',
-        row('Theme', null, themes),
-        row('Accent', 'Slide to recolour every highlight', h('div', { class: 'hue-wrap' }, hue, h('button', { class: 'chipbtn', onclick: () => (set('hue', 128), (hue.value = 128)) }, 'reset'))),
-        tgl('topo', 'Contour map', 'The topographic lines behind the interface'),
-        tgl('grain', 'Film grain'),
-        tgl('frame', 'Framed pages', 'Pages sit in a well with a hard offset shadow; off fills the window edge to edge')),
-      sec('Browsing',
-        row('Search engine', null, seg('engine', Object.entries(S.ENGINES).map(([k, e]) => [k, e.name]))),
-        row('Home page', 'Leave empty for the start page', text('home', 'roamer:start')),
-        row('New tabs open', null, seg('newTab', [['start', 'Start page'], ['home', 'Home page']])),
-        tgl('restoreTabs', 'Reopen tabs', 'Bring back the tabs you had open last time'),
-        row('Bookmarks bar', 'Ctrl+Shift+B hides or shows it', seg('bookmarksBar', [['always', 'Always'], ['start', 'Start page'], ['never', 'Hidden']])),
-        tgl('askClose', 'Ask before closing many tabs', 'Only when tabs are not reopened next time')),
-      sec('Downloads',
-        row('Save to', `Empty uses ${api.info?.downloads || 'your Downloads folder'}`, text('downloadsDir', api.info?.downloads || '', (v) => (api.send('dldir', { path: v }), v)))),
-      sec('Privacy',
-        row('History', `${S.history.length} visits`, h('button', { class: 'btn danger', onclick: () => api.openInternal('history') }, 'Manage')),
-        row('Site data', 'Cookies, cache and saved logins of every site', h('button', {
-          class: 'btn danger',
-          onclick: async () => {
-            if (await dialog({ title: 'Clear site data?', text: 'You will be signed out of websites. Bookmarks and history stay.', ok: 'Clear', danger: true })) {
-              api.send('clear');
-              toast('Site data cleared');
-            }
-          },
-        }, 'Clear…'))),
-      sec('Keys',
-        h('dl', { class: 'keys' }, ...[
-          ['Ctrl+T', 'New tab'], ['Ctrl+W', 'Close tab'], ['Ctrl+Shift+T', 'Reopen closed tab'], ['Ctrl+Tab', 'Next tab'], ['Ctrl+1…9', 'Go to tab'],
-          ['Ctrl+L', 'Address bar'], ['Ctrl+R / F5', 'Reload'], ['Alt+← / →', 'Back / forward'], ['Ctrl+D', 'Bookmark'], ['Ctrl+F', 'Find'],
-          ['Ctrl+H', 'History'], ['Ctrl+J', 'Downloads'], ['Ctrl+ + / − / 0', 'Zoom'], ['F11', 'Full screen'], ['F12', 'Developer tools'],
-        ].flatMap(([k, v]) => [h('dt', {}, h('kbd', {}, k)), h('dd', {}, v)]))),
-    ));
-  return { el };
 }
-

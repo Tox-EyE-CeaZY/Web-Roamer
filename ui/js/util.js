@@ -20,7 +20,11 @@ export function h(tag, props, ...kids) {
   for (const [k, v] of Object.entries(props || {})) {
     if (v == null || v === false) continue;
     if (k === 'class') el.className = v;
-    else if (k === 'style') typeof v === 'string' ? (el.style.cssText = v) : Object.assign(el.style, v);
+    else if (k === 'style') {
+      if (typeof v === 'string') el.style.cssText = v;
+      // custom properties (--x) only go in through setProperty
+      else for (const [p, x] of Object.entries(v)) p.startsWith('--') ? el.style.setProperty(p, x) : (el.style[p] = x);
+    }
     else if (k === 'html') el.innerHTML = v;
     else if (k === 'dataset') Object.assign(el.dataset, v);
     else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v);
