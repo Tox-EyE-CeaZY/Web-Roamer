@@ -69,6 +69,14 @@ const DEFAULTS = {
   themeColor: false, // tint the toolbar with a site's <meta name="theme-color">
   updates: true, // look for a new release now and then
   autoUpdate: true, // and download it, so it only takes a restart
+  newTabPage: '', // an address for new tabs when newTab is 'custom'
+  boards: 'auto', // image board searches typed in the address bar: 'auto' (open in Board Roamer) | 'chip' (only by the button) | 'off'
+  boardPath: '', // where Board Roamer lives, when Web Roamer can't find it itself
+  instant: true, // show instant answers (from DuckDuckGo) on the start page while typing
+  glide: true, // the start page's search box glides into the address bar when you start typing
+  unfurl: true, // a site's look spreads out from its tab
+  accel: true, // draw pages with the graphics card (takes a restart)
+  historyView: 'trail', // 'trail' | 'list'
 };
 
 export const settings = { ...DEFAULTS, ...read('settings', {}) };

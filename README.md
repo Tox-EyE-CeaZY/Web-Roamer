@@ -31,15 +31,23 @@ Because the exe isn't code-signed, SmartScreen may warn the first time: **More i
   header onto another to swap them. The toolbar's desktop button, or right-click a tab → *Show beside this tab*.
 - **Address bar** that takes an address or a search, completes addresses you've been to, suggests from your open
   tabs, bookmarks, history and the search engine, and Ctrl+Enter turns `example` into `www.example.com`.
-  Six search engines or your own. The lock opens the site's info: connection, zoom, history, its look.
+  Six search engines or your own, each with a **keyword** (`e6 wolf`, `w rust`, `yt lofi`); sites with a search of
+  their own are added as you visit them, and scrolling over the address bar flips through the engines. The lock opens
+  the site's info: connection, zoom, history, its look.
+- **Image boards** (e621, e926, Danbooru, Gelbooru, Safebooru, Derpibooru): a search typed in the address bar opens in
+  [Board Roamer](https://github.com/Tox-EyE-CeaZY/Board-Roamer) (needs Board Roamer 1.10), and board pages get an
+  *Open in Board Roamer* button.
 - **Bookmarks**: the star (Ctrl+D), a bookmarks bar, a manager to search, edit and reorder, import and export as the
   HTML file every browser reads.
-- **History** grouped by day, searchable, per-site removal; **Clear browsing data** (Ctrl+Shift+Del) for history,
+- **History as a trail**: your visits drawn as journeys along a path (a search and the pages that followed it), which
+  you can open again as a tab group; the plain list is one click away. Searchable, per-site removal; **Clear browsing data** (Ctrl+Shift+Del) for history,
   downloads, cookies and cache.
 - **Downloads** saved to your Downloads folder (or one you choose), with a list to open them or show them in the folder.
 - **Find in page** with a match count, **zoom** remembered per site, **full screen** (and videos' full screen fills the
   window), **view source** (Ctrl+U), translate, print, **developer tools**, new windows (Ctrl+N).
 - Ctrl+click or middle-click opens links in a background tab; hovering a link shows where it goes.
+- A **start page** whose search box glides up into the address bar when you start typing, and shows instant answers
+  (DuckDuckGo's summaries) and sums while you do. New tabs can open it, a blank page, your home page or any address.
 - A **start page** with a big search box, your bookmarks (or most visited sites) as tiles, your groups and where
   you've been lately, all adjustable.
 - **Settings** in sections with a search box; **Look**: Night / Paper / Violet / System themes, an accent colour
@@ -47,7 +55,10 @@ Because the exe isn't code-signed, SmartScreen may warn the first time: **More i
 - **Updates itself**: it checks GitHub for a new release, downloads it in the background, checks it against the
   release's checksums and only needs a restart (Windows and Linux; on macOS it opens the release page).
 - **Site looks**: websites can describe how Web Roamer should look while you're on them, with the
-  [Site Theming SDK](docs/SITE-THEMING.md). You decide whether they may (never / ask / always, per site).
+  [Site Theming SDK](docs/SITE-THEMING.md): colours, shapes, the site's own tab shape and style, type. The tab wears
+  the look even in the background, and the rest of the browser takes it by spreading out from the tab. You decide
+  whether sites may (never / ask / always, per site). A prompt for building it into a site builder is in
+  [docs/FLAVION-PROMPT.md](docs/FLAVION-PROMPT.md).
   Try [docs/theme-demo.html](docs/theme-demo.html).
 
 Web addresses given on the command line open as tabs. The window opens where you left it.
@@ -69,6 +80,12 @@ Same stack as Board Roamer: Rust with [tao](https://github.com/tauri-apps/tao) f
 Build it yourself with `cargo build --release` (on Linux first install `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev`).
 Every push to main builds every platform and publishes the downloads as the release for the version in `Cargo.toml`;
 bump that version to start a new release.
+
+## To do
+
+- **Linux on Electron.** Web Roamer draws pages with the system's own web view (WebView2 on Windows, WKWebView on Mac,
+  WebKitGTK on Linux). WebKitGTK is the weak one: pages can't be hidden without being drawn again, downloads take their
+  name from the address, and it is slow to start. Moving the Linux build to Electron is planned, not started.
 
 ## Known limits
 

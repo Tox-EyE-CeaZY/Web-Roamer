@@ -2,6 +2,7 @@ import { h, debounce, host } from './util.js';
 import { icon, MARK } from './icons.js';
 import { dialog, toast } from './ui.js';
 import * as S from './store.js';
+import * as E from './engines.js';
 
 /**
  * roamer:settings. Sections down the left (and a search over every setting), the controls on the right.
@@ -27,6 +28,7 @@ export function settingsPage(api) {
     i.addEventListener('change', () => set(k, after(i.value.trim())));
     return i;
   };
+  const wide = (r) => (r.classList.add('wide'), r);
   const button = (label, run, cls = '') => h('button', { class: 'btn ' + cls, onclick: run }, label);
   const sections = [];
   const sec = (id, title, ic, ...rows) => {
@@ -55,6 +57,37 @@ export function settingsPage(api) {
     return v;
   });
   const engines = seg('engine', [...Object.entries(S.ENGINES).map(([k, e]) => [k, e.name]), ['custom', 'Custom']], (v) => v === 'custom' && !S.settings.customEngine && custom.focus());
+
+  // every engine with its keyword; the ones sites told us about can be edited or forgotten
+  const engineList = h('div', { class: 'site-list eng-list' });
+  const paintEngines = () => {
+    const mine = new Set(E.mine().map((e) => e.id));
+    engineList.replaceChildren(...E.all().filter((e) => !e.def).map((e) => {
+      const key = h('input', { class: 'input mono eng-key', value: e.key || '', placeholder: 'keyword', spellcheck: 'false', maxlength: 12, 'aria-label': e.name + ' keyword' });
+      key.addEventListener('change', () => {
+        const v = key.value.trim().toLowerCase().replace(/\s+/g, '');
+        const clash = E.all().find((x) => x.id !== e.id && (x.key || '').toLowerCase() === v);
+        if (v && clash) return toast(`“${v}” is already ${clash.name}’s keyword`, { err: true }), (key.value = e.key || '');
+        if (mine.has(e.id)) E.update(e.id, { key: v });
+        else E.add({ ...e, key: v }); // changing a built-in's keyword makes it yours
+        paintEngines();
+      });
+      return h('div', { class: 'site-row' }, h('span', { class: 'eng-n' }, e.name, e.found ? h('i', { class: 'eng-found', title: 'Found on the site itself' }, 'auto') : null), key,
+        mine.has(e.id) ? h('button', { class: 'ibtn sm', title: e.found ? 'Forget this engine' : 'Remove', onclick: () => (E.remove(e.id), paintEngines()), html: icon('close', 13) }) : h('span', { class: 'ibtn sm' }));
+    }),
+    h('div', { class: 'eng-add' }, button('Add a search engine…', async () => {
+      const name = h('input', { class: 'input', placeholder: 'Name', spellcheck: 'false' });
+      const url = h('input', { class: 'input mono', placeholder: 'https://example.com/search?q=%s', spellcheck: 'false' });
+      const key = h('input', { class: 'input mono', placeholder: 'keyword (optional)', spellcheck: 'false', maxlength: 12 });
+      const ok = await dialog({ title: 'Add a search engine', ok: 'Add', body: h('div', { class: 'dlg-fields' },
+        h('label', { class: 'dlg-field' }, h('span', {}, 'Name'), name), h('label', { class: 'dlg-field' }, h('span', {}, 'Search address, with %s where the words go'), url), h('label', { class: 'dlg-field' }, h('span', {}, 'Keyword'), key)) });
+      if (!ok) return;
+      if (!name.value.trim() || !/^https?:\/\/.+%s/.test(url.value.trim())) return toast('An engine needs a name and an address with http(s):// and %s', { err: true });
+      E.add({ name: name.value.trim(), url: url.value.trim(), key: key.value.trim().toLowerCase() });
+      paintEngines();
+    })));
+  };
+  paintEngines();
 
   // ---------- site looks
   const siteList = h('div', { class: 'site-list' });
@@ -117,11 +150,17 @@ export function settingsPage(api) {
       row('Shortcuts', 'The tiles under the search box', seg('startTiles', [['auto', 'Bookmarks, else most visited'], ['bookmarks', 'Bookmarks'], ['top', 'Most visited'], ['off', 'None']]), 'tiles'),
       tgl('startRecent', 'Recently roamed', 'The last pages you visited'),
       row('Home page', 'The house button and Alt+Home; empty for the start page', text('home', 'roamer:start')),
-      row('New tabs open', null, seg('newTab', [['start', 'Start page'], ['home', 'Home page']]))),
+      row('New tabs open', null, seg('newTab', [['start', 'Start page'], ['home', 'Home page'], ['blank', 'Blank'], ['custom', 'Another page']])),
+      row('New tab page', 'Used when new tabs open “Another page”', text('newTabPage', 'https://…', (v) => (v && S.settings.newTab !== 'custom' && set('newTab', 'custom'), v)))),
     sec('search', 'Search & address bar', 'search',
       row('Search engine', 'Used by the address bar and the start page', engines, 'google bing duckduckgo brave'),
       row('Custom engine', 'Its search address, with %s where the words go', custom),
-      tgl('suggestions', 'Search suggestions', 'Ask the search engine for suggestions while you type (it sees what you type)')),
+      wide(row('Keywords', 'Type a keyword and a space in the address bar (“e6 wolf”), or scroll over the address bar to flip through them. Sites with a search of their own are added as you visit them.', engineList, 'engines shortcut abbreviation scroll')),
+      tgl('suggestions', 'Search suggestions', 'Ask the search engine for suggestions while you type (it sees what you type)'),
+      tgl('instant', 'Instant answers', 'On the start page, show a summary or a sum while you type. The summaries come from DuckDuckGo, whatever your engine is.'),
+      tgl('glide', 'Glide into the address bar', 'The start page’s search box floats up to the address bar when you start typing'),
+      row('Image boards', 'A search for e621, Danbooru, Gelbooru, Safebooru or Derpibooru typed in the address bar can open in Board Roamer instead', seg('boards', [['auto', 'Open in Board Roamer'], ['chip', 'Only with the button'], ['off', 'Off']]), 'e621 booru'),
+      row('Board Roamer’s location', 'Only if Web Roamer can’t find it by itself', text('boardPath', 'C:\\…\\board-roamer.exe'))),
     sec('tabs', 'Tabs & groups', 'group',
       tgl('restoreTabs', 'Reopen tabs', 'Bring back the tabs and groups you had open last time'),
       row('Closing the last tab', null, seg('lastTab', [['start', 'Leaves a start page'], ['window', 'Closes the window']])),
@@ -131,9 +170,13 @@ export function settingsPage(api) {
       row('Desktop', 'Shows the pages of one group side by side. Right-click a tab → “Show beside this tab”, or use the toolbar’s desktop button.', button('Try it', () => api.toggleDesktop()), 'split tile side by side')),
     sec('looks', 'Site looks', 'layers',
       row('Let sites style Web Roamer', 'Sites made with the Site Theming SDK can recolour the browser while you’re on them', seg('siteThemes', [['off', 'Never'], ['ask', 'Ask'], ['on', 'Always']]), 'theme sdk'),
+      tgl('unfurl', 'Spread out from the tab', 'A site’s look starts at its tab and spreads over the rest of the browser'),
       tgl('themeColor', 'Tint with a site’s theme colour', 'Most sites name one colour for browsers (theme-color); use it as the backdrop'),
       row('Your choices', null, siteList),
       row('For web developers', 'How a site describes its look', button('Read the SDK', () => api.open(api.docsTheming, { newTab: true })))),
+    sec('perf', 'Performance', 'gift',
+      tgl('accel', 'Use hardware acceleration', 'Draw pages with the graphics card. Turn off only if pages flicker or look wrong. Takes a restart.', () => (api.send('accel', { on: !!S.settings.accel }), toast('Restart Web Roamer to apply this'))),
+      row('Pages', 'Each tab is its own page process; tabs you have not opened since restarting are not loaded until you click them', h('span', { class: 'faint' }, 'automatic'))),
     sec('privacy', 'Privacy & data', 'shield',
       row('Clear browsing data', 'History, the download list, cookies and cache', button('Clear…', () => api.clearData(), 'danger'), 'cookies cache delete'),
       row('History', `${S.history.length} visits kept on this computer`, button('Manage', () => api.openInternal('history'))),

@@ -1,7 +1,8 @@
 # Site Theming SDK
 
 Web Roamer lets a website suggest how the browser around it should look while you're on it: the backdrop, the
-accent colour, the pattern behind the interface, the corners and the typeface. It is **opt-in on both sides**: the
+accent colour, the pattern behind the interface, the shapes of things, its own tab and the typeface. The look
+starts at the site's tab and spreads out over the rest of the browser. It is **opt-in on both sides**: the
 site has to describe a look, and the person browsing decides whether sites may use it (Settings → Site looks:
 *Never*, *Ask* (the default) or *Always*, plus Allow/Block per site).
 
@@ -58,8 +59,13 @@ detection, keeps a meta tag in step for you, and follows `prefers-color-scheme` 
 | `text` | a colour | Optional: the main text colour. |
 | `scheme` | `dark` \| `light` | Optional hint for mid-grey backgrounds. Normally worked out from `background`. |
 | `pattern` | `topo` \| `grid` \| `dots` \| `lines` \| `none` | What sits behind the interface (`topo` is Web Roamer's contour map). |
-| `shape` | `chamfer` \| `square` | Web Roamer's cut corners, or plain square ones. |
-| `font` | `display` \| `sans` \| `serif` \| `mono` | The interface typeface, from fonts already on the computer. |
+| `shape` | `chamfer` \| `square` \| `round` \| `pill` \| `slant` | The shape of the address bar, buttons, panels and menus. `chamfer` is Web Roamer's cut corner. |
+| `tabShape` | `chamfer` \| `square` \| `round` \| `pill` \| `slant` \| `notch` | The shape of **your tab**. Defaults to `shape`. |
+| `tabStyle` | `solid` \| `outline` \| `glow` \| `underline` | How your tab is drawn: filled (the default), just an outline, a lit-from-inside glow, or a plain underline. |
+| `shadow` | `hard` \| `soft` \| `none` | The shadow under the framed page: Web Roamer's hard offset one, a soft glow, or none. |
+| `border` | `none` \| `thin` \| `normal` \| `thick` | How heavy the lines around panels and the page are. |
+| `density` | `compact` \| `cozy` \| `roomy` | How much room the interface takes: smaller type and tabs, or larger. |
+| `font` | `display` \| `sans` \| `serif` \| `mono` \| `rounded` \| `condensed` \| `slab` \| `hand` | The interface typeface, from fonts already on the computer (each name is a list of common fonts, with a fallback). |
 | `frame` | `true` \| `false` | Whether your page sits in a framed well or fills the window edge to edge. |
 
 Colours can be `#rgb`, `#rrggbb`, `rgb()`, `hsl()`, `hwb()`, `lab()`, `lch()`, `oklab()`, `oklch()` or a colour
@@ -72,8 +78,14 @@ Sites that only have the standard `<meta name="theme-color">` can tint the brows
 
 - **Readable, always.** Text is pushed until it reaches at least 7:1 contrast with your background, secondary text
   4.5:1, and the accent 2.6:1. You choose the colours; the browser keeps them legible.
-- **Only your tab.** The look applies while your page is the focused tab (or the focused page of a desktop) and is
-  removed the moment someone switches away. It never reaches Web Roamer's own pages (start, settings, history...).
+- **Only your tab.** Your **tab** always wears your colours, shape and style, even when it is in the background, so
+  several themed sites sit side by side in the tab bar. The rest of the browser takes your look only while your page
+  is the focused tab (or the focused page of a desktop) and gives it back the moment someone switches away, spreading
+  out from the tab when it arrives and again when it leaves. It never reaches Web Roamer's own pages (start,
+  settings, history...). People can turn the spreading animation off (Settings → Site looks) and it is skipped for
+  anyone who asks their system for reduced motion.
+- **No code.** A look is data: a short list of named choices and plain colours. Nothing a site sends is ever run
+  by the browser, no styles or markup are accepted, and unknown or malformed values are dropped.
 - **No disguises.** A look cannot change the address bar's text, the lock/not-secure icon, the window buttons,
   menus' contents or any wording. There is no way to add text, images or links to the browser.
 - **Same origin only.** A look belongs to the origin of the page that set it, and it's checked against the tab's real

@@ -1,5 +1,6 @@
 #![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
 
+mod extras;
 mod os;
 mod update;
 
@@ -15,6 +16,10 @@ use tao::{
 use tao::platform::macos::WindowBuilderExtMacOS;
 #[cfg(windows)]
 use tao::platform::windows::WindowBuilderExtWindows;
+#[cfg(windows)]
+use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Environment;
+#[cfg(windows)]
+use wry::{WebViewBuilderExtWindows, WebViewExtWindows};
 use wry::{
     dpi::{LogicalPosition, LogicalSize},
     http::{header::CONTENT_TYPE, Request, Response},
@@ -28,6 +33,37 @@ struct Assets;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// WebView2 switches. Keeps wry's defaults (no mini menu, no SmartScreen round trip on every address) and asks for GPU
+/// drawing even on drivers Chromium is cautious about. `accel.off` in the data folder (Settings › Performance) drops the GPU ones.
+#[cfg(windows)]
+fn browser_args() -> String {
+    let mut a = String::from("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection");
+    if accel_on() {
+        a.push_str(" --enable-gpu-rasterization --enable-zero-copy");
+    } else {
+        a.push_str(" --disable-gpu");
+    }
+    a
+}
+
+fn accel_on() -> bool {
+    !os::data_dir().join("accel.off").exists()
+}
+
+/// WebKitGTK uses the GPU on demand (animations, video, canvas) by default, which suits most machines; forcing it on
+/// shows blank windows with some drivers. Switching acceleration off in Settings makes it never use the GPU.
+#[cfg(target_os = "linux")]
+fn accelerate(wv: &WebView) {
+    use webkit2gtk::{HardwareAccelerationPolicy, SettingsExt, WebViewExt};
+    use wry::WebViewExtUnix;
+    if accel_on() {
+        return;
+    }
+    if let Some(st) = WebViewExt::settings(&wv.webview()) {
+        st.set_hardware_acceleration_policy(HardwareAccelerationPolicy::Never);
+    }
+}
+
 #[cfg(windows)]
 const CHROME_ORIGIN: &str = "http://roamer.localhost/";
 #[cfg(not(windows))]
@@ -40,9 +76,7 @@ const CHROME_ORIGIN: &str = "roamer://localhost/";
 const PAGE_JS: &str = r#"(() => {
   if (window.top !== window || window.__roamer) return;
   window.__roamer = 1;
-  // wry's WebKitGTK side panics on a message from a file:// page, so those pages stay quiet there
-  const quiet = window.__roamerQuietFiles && location.protocol === 'file:';
-  const post = (m) => { if (quiet) return; try { window.ipc.postMessage(m); } catch (_) {} };
+  const post = (m) => { try { window.ipc.postMessage(m); } catch (_) {} };
   const combo = (e) => ((e.ctrlKey || e.metaKey) ? 'c' : '') + (e.shiftKey ? 's' : '') + (e.altKey ? 'a' : '') + '+' + (e.key || '').toLowerCase();
   // the browser's own keys always win; the others only when the page did not use them itself (an editor's Ctrl+F ...)
   const HARD = new Set(['c+t','c+n','c+w','cs+t','cs+n','cs+w','c+tab','cs+tab','c+pageup','c+pagedown','cs+q','+f11']);
@@ -179,6 +213,37 @@ const PAGE_JS: &str = r#"(() => {
     try { dispatchEvent(new Event('roamer:ready')); } catch (_) {}
   };
   if (document.readyState === 'loading') addEventListener('DOMContentLoaded', watchHead, { once: true }); else watchHead();
+
+  // the site's own search, so the address bar can search it by a keyword: an OpenSearch link, or a plain GET search form
+  let engineSent = '';
+  const findSearch = () => {
+    try {
+      let msg = '';
+      const l = document.querySelector('link[rel="search"][type*="opensearch"][href]');
+      if (l) msg = 'os:' + l.href;
+      else {
+        for (const f of document.forms) {
+          if ((f.method || 'get').toLowerCase() !== 'get' || !f.offsetParent) continue;
+          const u = new URL(f.action || location.href, location.href);
+          if (u.origin !== location.origin) continue;
+          const q = [...f.elements].find((el) => el.name && !el.disabled && /^(text|search)?$/.test(el.type || '') && (el.type === 'search' || f.getAttribute('role') === 'search' || /^(q|query|search|tags|keywords?|term|searchterm|search_query|s)$/i.test(el.name)));
+          if (!q || q.offsetWidth < 40) continue;
+          const sp = new URLSearchParams();
+          for (const el of f.elements) {
+            if (!el.name || el.disabled || el === q) continue;
+            if ((el.type === 'hidden' || el.tagName === 'SELECT') && el.value) sp.append(el.name, el.value);
+          }
+          const rest = sp.toString();
+          const url = u.origin + u.pathname + '?' + (rest ? rest + '&' : '') + encodeURIComponent(q.name) + '=%s';
+          const name = (document.querySelector('meta[property="og:site_name"]') || {}).content || location.hostname.replace(/^www\./, '');
+          msg = 'form:' + JSON.stringify({ name: String(name).slice(0, 40), url });
+          break;
+        }
+      }
+      if (msg && msg !== engineSent) { engineSent = msg; post('engine:' + msg); }
+    } catch (_) {}
+  };
+  addEventListener('load', () => setTimeout(findSearch, 600), { once: true });
 })();"#;
 
 /// Things that happen inside a page's web view, reported back to the event loop.
@@ -198,6 +263,8 @@ enum Ev {
     Suggest(u64, String, Vec<String>),
     /// progress of an update download (see update.rs)
     Update(Value),
+    /// anything else fetched in the background that the chrome is waiting for (already shaped as its message)
+    Tell(Value),
 }
 
 fn mime(path: &str) -> &'static str {
@@ -237,6 +304,9 @@ struct Browser {
     ctx: WebContext,
     proxy: EventLoopProxy<Ev>,
     chrome: WebView,
+    /// one WebView2 environment shared by every page: building a fresh one for each tab is what made new pages slow to appear
+    #[cfg(windows)]
+    env: ICoreWebView2Environment,
     pages: HashMap<u32, WebView>,
     /// each page's address as of its last load event
     urls: HashMap<u32, String>,
@@ -339,13 +409,15 @@ impl Browser {
         };
         let (s_ipc, s_load, s_title) = (sender(self.proxy.clone()), sender(self.proxy.clone()), sender(self.proxy.clone()));
         let popup = Mutex::new(self.proxy.clone());
-        let page_js_linux = format!("window.__roamerQuietFiles=1;{PAGE_JS}");
-        let builder = WebViewBuilder::new_with_web_context(&mut self.ctx)
+        let builder = WebViewBuilder::new_with_web_context(&mut self.ctx);
+        #[cfg(windows)]
+        let builder = builder.with_environment(self.env.clone());
+        let builder = builder
             .with_url(url)
             .with_bounds(rect)
             .with_visible(false)
             .with_devtools(true)
-            .with_initialization_script(if cfg!(target_os = "linux") { &page_js_linux } else { PAGE_JS })
+            .with_initialization_script(PAGE_JS)
             .with_ipc_handler(move |r| s_ipc(Msg::Ipc(r.body().clone())))
             .with_on_page_load_handler(move |e, u| s_load(Msg::Loading(matches!(e, PageLoadEvent::Started), u)))
             .with_document_title_changed_handler(move |t| s_title(Msg::Title(t)))
@@ -379,6 +451,7 @@ impl Browser {
         let wv = wv.map_err(|e| eprintln!("could not open a page: {e}")).ok()?;
         #[cfg(target_os = "linux")]
         {
+            accelerate(&wv);
             download_files(&wv);
             if !self.dl_hooked {
                 self.dl_hooked = true;
@@ -453,6 +526,30 @@ impl Browser {
                     "data": os::data_dir(), "secondary": self.secondary,
                     "selfUpdate": update::asset_name().is_some(), "staged": update::staged_tag() }));
                 self.push_state();
+            }
+            "instant" => {
+                let (n, q) = (v["n"].as_u64().unwrap_or(0), s("q"));
+                let proxy = self.proxy.clone();
+                std::thread::spawn(move || {
+                    let a = extras::instant(&q);
+                    let _ = proxy.send_event(Ev::Tell(json!({ "t": "instant", "n": n, "q": q, "answer": a })));
+                });
+            }
+            "boardroamer" => {
+                let (link, hint) = (s("url"), s("path"));
+                let proxy = self.proxy.clone();
+                std::thread::spawn(move || {
+                    let r = extras::board_roamer(&link, &hint);
+                    let _ = proxy.send_event(Ev::Tell(json!({ "t": "boardresult", "url": link, "ok": r.is_ok(), "why": r.err().unwrap_or("") })));
+                });
+            }
+            "accel" => {
+                let flag = os::data_dir().join("accel.off");
+                if v["on"].as_bool().unwrap_or(true) {
+                    let _ = std::fs::remove_file(flag);
+                } else {
+                    let _ = std::fs::write(flag, "off");
+                }
             }
             "nav" => {
                 if let Some(id) = id {
@@ -690,6 +787,28 @@ impl Browser {
                             self.tell(json!({ "t": "sitetheme", "id": id, "theme": t, "url": url }));
                         }
                     }
+                } else if let Some(rest) = s.strip_prefix("engine:") {
+                    // a site's own search: a plain form arrives ready, an OpenSearch description is fetched here
+                    let page = self.real_url(id);
+                    let proxy = self.proxy.clone();
+                    if let Some(f) = rest.strip_prefix("form:") {
+                        if let Ok(mut e) = serde_json::from_str::<Value>(f) {
+                            e["t"] = json!("engine");
+                            e["page"] = json!(page);
+                            let _ = proxy.send_event(Ev::Tell(e));
+                        }
+                    } else if let Some(href) = rest.strip_prefix("os:") {
+                        // only from the page's own site
+                        let same = |a: &str, b: &str| a.split('/').nth(2).is_some() && a.split('/').nth(2) == b.split('/').nth(2);
+                        if href.starts_with("http") && same(href, &page) {
+                            let href = href.to_string();
+                            std::thread::spawn(move || {
+                                if let Some((name, url)) = extras::opensearch(&href) {
+                                    let _ = proxy.send_event(Ev::Tell(json!({ "t": "engine", "name": name, "url": url, "page": page })));
+                                }
+                            });
+                        }
+                    }
                 } else if let Some(text) = s.strip_prefix("src:") {
                     if let Some(i) = self.want_source.iter().position(|w| *w == id) {
                         self.want_source.remove(i);
@@ -909,7 +1028,10 @@ fn main() {
     let size = window.inner_size().to_logical::<f64>(window.scale_factor());
     let chrome_proxy = proxy.clone();
     let boot = format!("window.__plat='{}';window.__start={};window.__secondary={secondary};", os::os_name(), json!(start));
-    let builder = WebViewBuilder::new_with_web_context(&mut ctx)
+    let builder = WebViewBuilder::new_with_web_context(&mut ctx);
+    #[cfg(windows)]
+    let builder = builder.with_additional_browser_args(browser_args());
+    let builder = builder
         .with_custom_protocol("roamer".into(), |_, req| serve(req))
         .with_url(format!("{CHROME_ORIGIN}index.html"))
         .with_bounds(Rect { position: LogicalPosition::new(0.0, 0.0).into(), size: LogicalSize::new(size.width, size.height).into() })
@@ -929,6 +1051,8 @@ fn main() {
         use wry::WebViewBuilderExtUnix;
         builder.build_gtk(&fixed).expect("webview")
     };
+    #[cfg(target_os = "linux")]
+    accelerate(&chrome);
 
     let mut b = Browser {
         window,
@@ -936,6 +1060,8 @@ fn main() {
         fixed,
         ctx,
         proxy,
+        #[cfg(windows)]
+        env: chrome.environment(),
         chrome,
         pages: HashMap::new(),
         urls: HashMap::new(),
@@ -971,6 +1097,7 @@ fn main() {
                 v["t"] = json!("update");
                 b.tell(v);
             }
+            Event::UserEvent(Ev::Tell(v)) => b.tell(v),
             Event::UserEvent(Ev::Suggest(n, q, list)) => b.tell(json!({ "t": "suggest", "n": n, "q": q, "list": list })),
             _ => {}
         }

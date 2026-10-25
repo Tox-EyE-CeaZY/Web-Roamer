@@ -6,6 +6,8 @@ import { toast, dialog, showMenu, closeMenu, holdOverlay, favicon, popover, clos
 import * as S from './store.js';
 import * as G from './groups.js';
 import * as Look from './sitetheme.js';
+import * as E from './engines.js';
+import * as B from './boards.js';
 import { renderPage, INTERNAL } from './pages.js';
 
 /**
@@ -60,14 +62,26 @@ export function resolve(text) {
   if (isInternal(t)) return INTERNAL[internalName(t)] ? 'roamer:' + internalName(t) : 'roamer:start';
   // "? words" always searches (Ctrl+K / Ctrl+E start one)
   if (t.startsWith('?')) return t.slice(1).trim() ? searchUrl(t.slice(1).trim()) : null;
+  // "e6 wolf": a search engine's keyword and what to look for
+  const kw = E.keyword(t);
+  if (kw && !/^(https?|file|about|data):/i.test(t)) return E.searchUrl(kw.engine, kw.query);
   if (/^(https?|file|about|data):/i.test(t)) return t;
   if (/^(localhost|\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:]+\])(:\d+)?(\/.*)?$/i.test(t)) return 'http://' + t;
   if (!/\s/.test(t) && /^[^\s/?#]+\.[a-z][a-z0-9-]{1,62}\.?(:\d+)?([/?#].*)?$/i.test(t)) return 'https://' + t;
   return searchUrl(t);
 }
-export const searchUrl = (q) => S.engine().url.replace('%s', encodeURIComponent(q));
+/** An engine picked for the next search by scrolling over the address bar (or the start page's search box). */
+let searchWith = null;
+export const curEngine = () => (searchWith && E.byId(searchWith)) || E.all()[0];
+export const searchUrl = (q, eng = curEngine()) => E.searchUrl(eng, q);
 const homeUrl = () => (S.settings.home && resolve(S.settings.home)) || 'roamer:start';
-const newTabUrl = () => (S.settings.newTab === 'home' ? homeUrl() : 'roamer:start');
+const newTabUrl = () => {
+  const n = S.settings.newTab;
+  if (n === 'blank') return 'roamer:blank';
+  if (n === 'home') return homeUrl();
+  if (n === 'custom') return (S.settings.newTabPage && resolve(S.settings.newTabPage)) || 'roamer:start';
+  return 'roamer:start';
+};
 
 function titleOf(t) {
   if (isInternal(t.url)) {
@@ -115,10 +129,33 @@ function go(t, url, { quiet, typed } = {}) {
 /** Navigate the current tab (or a new one). */
 export function open(url, { newTab: inNew, background, typed } = {}) {
   if (!url) return;
+  // a board search typed in the address bar belongs in Board Roamer
+  if (typed && S.settings.boards === 'auto' && B.wants(url)) return handOff(url, { inNew });
   const t = active();
   if (inNew || background || t?.pinned && !isInternal(url) && hostOf(url) !== hostOf(t.url) && !typed) newTab(url, { activate: !background, group: t && deskOf(t) ? t.group : null });
   else go(t, url, { typed });
 }
+
+/** Show an image board link in Board Roamer; if that is not possible, open it here after all. */
+const handing = new Map();
+export function handOff(url, { inNew, silent } = {}) {
+  handing.set(url, { inNew });
+  send('boardroamer', { url, path: S.settings.boardPath || '' });
+  if (!silent) toast(`Opening ${B.boardName(url)} in Board Roamer…`, { ms: 2200 });
+}
+on('boardresult', (m) => {
+  const h_ = handing.get(m.url);
+  handing.delete(m.url);
+  if (!h_ || m.ok) return;
+  const here = () => (h_.inNew ? newTab(m.url) : go(active(), m.url, { typed: true }));
+  const why = {
+    missing: 'Board Roamer isn’t installed here, or Web Roamer can’t find it. Opened on the site instead.',
+    old: 'This Board Roamer is too old to take a search from Web Roamer. Update it and try again. Opened on the site instead.',
+    start: 'Board Roamer wouldn’t start. Opened on the site instead.',
+  }[m.why] || 'Board Roamer didn’t answer. Opened on the site instead.';
+  here();
+  toast(why, { err: true, ms: 7000, action: m.why === 'missing' ? 'Get Board Roamer' : 'Settings', run: () => (m.why === 'missing' ? open('https://github.com/Tox-EyE-CeaZY/Board-Roamer/releases', { newTab: true }) : openInternal('settings')) });
+});
 
 function activate_(id, { focusPage } = {}) {
   if (!byId(id)) return;
@@ -163,7 +200,7 @@ function present(focusPage = false) {
   else if (focusPage && t.live) send('focus', { id: t.id });
   paintTabs();
   paintBar();
-  siteLook();
+  siteLook(false, true);
   scrollTabIntoView(t.id);
   think();
 }
@@ -277,6 +314,16 @@ function createGroup(ids, name, { color, desktop = false, topics = [], edit = fa
   saveSession();
   if (edit) requestAnimationFrame(() => editGroup(g));
   return g;
+}
+/** Open a list of pages again as one tab group (a trail journey). */
+function reopenAll(urls, name) {
+  let after = activeId;
+  const ids = urls.map((u, i) => {
+    const t = newTab(u, { activate: i === 0, pending: i > 0, after });
+    after = t.id;
+    return t.id;
+  });
+  createGroup(ids, name);
 }
 function addToGroup(ids, gid) {
   const g = groupById(gid);
@@ -646,13 +693,14 @@ async function closeWindow(force) {
 
 let dragId = null;
 function tabEl(t, g) {
+  const lk = Look.tabLook(tabTheme(t));
   const el = h('div', {
-    class: 'tab-i' + (t.id === activeId ? ' on' : '') + (t.loading ? ' loading' : '') + (t.pinned ? ' pin' : '') + (g ? ' in-grp' : '')
+    class: 'tab-i' + (lk ? ' looked' : '') + (t.id === activeId ? ' on' : '') + (t.loading ? ' loading' : '') + (t.pinned ? ' pin' : '') + (g ? ' in-grp' : '')
       + (deskTabs().includes(t) ? ' on-desk' : '') + (offer?.ids.includes(t.id) ? ' offered' : ''),
     title: titleOf(t) + (isInternal(t.url) ? '' : '\n' + t.url) + (t.muted ? '\n(muted)' : ''),
     draggable: 'true',
-    style: g ? { '--gh': G.COLORS[g.color] } : null,
-    dataset: { id: t.id },
+    style: { ...(g ? { '--gh': G.COLORS[g.color] } : null), ...lk?.style },
+    dataset: { id: t.id, ...(lk?.shape ? { ts: lk.shape } : null), ...(lk?.tabStyle ? { tstyle: lk.tabStyle } : null) },
     onmousedown: (e) => e.button === 0 && !e.target.closest('.ti-x, .ti-snd') && t.id !== activeId && activate_(t.id, { focusPage: true }),
     onauxclick: (e) => e.button === 1 && (e.preventDefault(), closeTab(t.id)),
     oncontextmenu: (e) => (e.preventDefault(), tabMenu(t, e.clientX, e.clientY)),
@@ -779,8 +827,8 @@ function tabMenu(t, x, y) {
 
 /** Find an open tab by typing (Ctrl+Shift+A), with the recently closed ones under it. */
 function tabSearch(anchor) {
-  const input = h('input', { class: 'input ts-q', placeholder: 'Search open tabs', spellcheck: 'false' });
-  const list = h('div', { class: 'ts-list' });
+  const input = h('input', { class: 'input tq-q', placeholder: 'Search open tabs', spellcheck: 'false' });
+  const list = h('div', { class: 'tq-list' });
   let items = [], cur = 0;
   const paint = () => {
     const f = input.value.trim().toLowerCase();
@@ -792,8 +840,8 @@ function tabSearch(anchor) {
     cur = clamp(cur, 0, Math.max(0, items.length - 1));
     let closedHead = false;
     list.replaceChildren(...items.flatMap((it, i) => {
-      const row = (ic, title, sub, extra) => h('button', { class: 'ts-i' + (i === cur ? ' hi' : ''), onclick: () => pick(it), onmouseenter: () => ((cur = i), paint()) },
-        h('span', { class: 'ts-ic' }, ic), h('span', { class: 'ts-t' }, title), h('span', { class: 'ts-u' }, sub), extra);
+      const row = (ic, title, sub, extra) => h('button', { class: 'tq-i' + (i === cur ? ' hi' : ''), onclick: () => pick(it), onmouseenter: () => ((cur = i), paint()) },
+        h('span', { class: 'tq-ic' }, ic), h('span', { class: 'tq-t' }, title), h('span', { class: 'tq-u' }, sub), extra);
       if (it.t) {
         const g = groupById(it.t.group);
         return [row(isInternal(it.t.url) ? h('i', { html: icon('compass', 14) }) : favicon(it.t.icon, 14), titleOf(it.t), isInternal(it.t.url) ? '' : hostOf(it.t.url),
@@ -820,7 +868,7 @@ function tabSearch(anchor) {
   });
   paint();
   send('focuschrome');
-  popover(h('div', { class: 'tsearch' }, h('div', { class: 'ts-top' }, input,
+  popover(h('div', { class: 'tsearch' }, h('div', { class: 'tq-top' }, input,
     h('button', { class: 'chipbtn', title: 'Group the tabs that belong together', onclick: () => (closePopover(), organize()) }, '✦ Organize')), list),
   { anchor: anchor || $('.tb-search'), align: 'right', cls: 'pv-tabs' });
   setTimeout(() => input.focus(), 20);
@@ -834,7 +882,9 @@ const zoomChip = h('button', { class: 'zoom-chip', title: 'Reset zoom (Ctrl+0)',
 const lookChip = h('button', { class: 'a-btn look-chip', onclick: () => lookOffer(), html: icon('brush', 16) });
 const star = h('button', { class: 'a-btn', title: 'Bookmark this page (Ctrl+D)', onclick: () => toggleBookmark(active()) });
 const go_ = h('button', { class: 'go', title: 'Go', onclick: () => submit(), html: icon('go', 18) });
-const field = h('div', { class: 'field cut' }, addrIc, h('div', { class: 'q-wrap' }, q, pretty), zoomChip, lookChip, star, go_);
+const engChip = h('button', { class: 'eng-chip', hidden: true, title: 'Search with… (scroll over the address bar to switch)', onmousedown: (e) => e.preventDefault(), onclick: (e) => (engChip._hint ? (pickEngine(engChip._hint.id), q.focus()) : engineMenu(e.currentTarget)) });
+const boardChip = h('button', { class: 'a-btn board-chip', hidden: true, title: 'Open this in Board Roamer', onclick: () => handOff(active().url), html: icon('layers', 16) });
+const field = h('div', { class: 'field cut' }, addrIc, h('div', { class: 'q-wrap' }, q, pretty), engChip, zoomChip, boardChip, lookChip, star, go_);
 const sugg = h('div', { class: 'sugg cut', hidden: true });
 const btn = (ic, title, run, extra = {}) => h('button', { class: 'ibtn', title, onclick: run, html: icon(ic, 19), ...extra });
 const backBtn = btn('back', 'Back (Alt+Left)', () => send('back', { id: activeId }));
@@ -868,12 +918,21 @@ function buildToolbar() {
     send('focuschrome');
     q.focus();
   });
+  // scrolling over the address bar flips through the search engines
+  field.addEventListener('wheel', (e) => {
+    if (e.target.closest('.a-btn, .ibtn') || Math.abs(e.deltaY) < 1) return;
+    e.preventDefault();
+    cycleEngine(e.deltaY > 0 ? 1 : -1);
+  }, { passive: false });
   q.addEventListener('focus', () => {
     field.classList.add('focus');
+    paintEngChip();
     if (!field.classList.contains('edited')) q.select();
   });
   q.addEventListener('blur', () => {
     field.classList.remove('focus');
+    if (!field.classList.contains('edited')) searchWith = null;
+    paintEngChip();
     setTimeout(() => {
       if (document.activeElement !== q) hideSugg();
     }, 150);
@@ -883,6 +942,7 @@ function buildToolbar() {
     field.classList.add('edited');
     typed = q.value;
     autocomplete(e.inputType || '');
+    paintEngChip();
     suggest();
   });
   q.addEventListener('keydown', (e) => {
@@ -895,6 +955,7 @@ function buildToolbar() {
       e.preventDefault();
       if (!sugg.hidden) return hideSugg();
       field.classList.remove('edited');
+      searchWith = null;
       paintAddress(true);
       q.blur();
       const t = active();
@@ -926,6 +987,8 @@ function submit(inNew) {
   hideSugg();
   field.classList.remove('edited');
   q.blur();
+  searchWith = null;
+  paintEngChip();
   if (pick?.kind === 'tab') return activate_(pick.id, { focusPage: true });
   if (!url) return;
   open(url, { newTab: inNew, typed: true });
@@ -937,7 +1000,8 @@ function paintAddress(force) {
   if (document.activeElement === q && !force) return;
   if (field.classList.contains('edited') && !force) return;
   const internal = isInternal(t.url);
-  q.value = internal && t.url === 'roamer:start' ? '' : internal ? 'roamer:' + internalName(t.url) : t.url;
+  const bare = t.url === 'roamer:start' || t.url === 'roamer:blank';
+  q.value = internal && bare ? '' : internal ? 'roamer:' + internalName(t.url) : t.url;
   let secure = false;
   pretty.replaceChildren();
   if (!internal) {
@@ -951,7 +1015,7 @@ function paintAddress(force) {
     } catch {
       pretty.append(h('span', { class: 'p-host' }, t.url));
     }
-  } else if (t.url !== 'roamer:start') pretty.append(h('span', { class: 'p-scheme' }, 'roamer:'), h('span', { class: 'p-host' }, internalName(t.url)));
+  } else if (!bare) pretty.append(h('span', { class: 'p-scheme' }, 'roamer:'), h('span', { class: 'p-host' }, internalName(t.url)));
   const http = t.url.startsWith('http:');
   addrIc.innerHTML = icon(internal ? 'compass' : secure ? 'lock' : http ? 'unlock' : 'globe', 16);
   addrIc.className = 'a-ic' + (secure ? ' secure' : '') + (http ? ' insecure' : '');
@@ -974,6 +1038,7 @@ function paintBar() {
   zoomChip.hidden = !web || Math.abs(t.zoom - (S.settings.defaultZoom || 1)) < 0.001;
   zoomChip.textContent = Math.round(t.zoom * 100) + '%';
   paintLookChip();
+  boardChip.hidden = !web || S.settings.boards === 'off' || !B.wants(t.url);
   root.classList.toggle('loading', !!t.loading);
   const title = titleOf(t);
   document.title = `${title} · Web Roamer`;
@@ -996,7 +1061,7 @@ function siteInfo() {
   const zv = h('b', {}, Math.round(t.zoom * 100) + '%');
   const zoomBy = (d) => (zoomStep(d), (zv.textContent = Math.round(active().zoom * 100) + '%'));
   const look = t.look;
-  const choice = S.themeSites[u.origin];
+  const choice = S.themeSites[originOf(t.url)];
   const row = (ic, label, run, cls = '') => h('button', { class: 'pv-row ' + cls, onclick: () => (closePopover(), run()) }, h('i', { html: icon(ic, 15) }), h('span', {}, label));
   popover(h('div', { class: 'site-info' },
     h('div', { class: 'si-host' }, favicon(t.icon, 18, hn), h('b', {}, hn)),
@@ -1011,7 +1076,7 @@ function siteInfo() {
       ? h('div', { class: 'si-row' }, h('span', {}, 'This site’s look for Web Roamer'),
         h('div', { class: 'seg' }, ...[['allow', 'Use'], ['block', 'Don’t']].map(([v, l]) => h('button', {
           class: 'seg-b' + ((choice || (S.settings.siteThemes === 'on' ? 'allow' : '')) === v ? ' on' : ''),
-          onclick: () => (S.setThemeSite(u.origin, v), closePopover(), siteLook(true)),
+          onclick: () => (S.setThemeSite(originOf(t.url), v), closePopover(), siteLook(true, true)),
         }, l))))
       : null,
     h('div', { class: 'pv-rows' },
@@ -1026,11 +1091,75 @@ function siteInfo() {
   { anchor: addrIc, cls: 'pv-site' });
 }
 
+// ------------------------------------------------------------ search engines
+/** The engine the next search would use: a typed keyword, one scrolled to, or the default. */
+function typedEngine() {
+  const kw = E.keyword(q.value || '');
+  return kw?.engine || null;
+}
+/** The engine of the site being viewed, if it has one of its own (a hint while the address bar is empty). */
+function siteEngine() {
+  const t = active();
+  if (!t || isInternal(t.url)) return null;
+  const hn = hostOf(t.url).replace(/^www\./, '');
+  return E.all().find((e) => !e.def && e.url.includes('//') && hostOf(e.url).replace(/^www\./, '') === hn) || null;
+}
+function paintEngChip() {
+  const kw = typedEngine();
+  const focused = document.activeElement === q;
+  const hint = !kw && !searchWith && focused && !q.value.trim() ? siteEngine() : null;
+  engChip._hint = hint;
+  const eng = kw || hint || curEngine();
+  engChip.hidden = !(kw || searchWith || focused);
+  engChip.classList.toggle('picked', !!kw || !!searchWith);
+  engChip.classList.toggle('hint', !!hint);
+  engChip.replaceChildren(h('span', {}, hint ? 'Search ' + eng.name : eng.name), eng.key ? h('kbd', {}, eng.key) : null);
+  if (typeof startLiveRefresh === 'function') startLiveRefresh();
+}
+function cycleEngine(d) {
+  const list = E.all();
+  if (list.length < 2) return;
+  if (document.activeElement !== q) focusAddress(q.value && field.classList.contains('edited') ? q.value : '');
+  const cur = Math.max(0, list.findIndex((e) => e.id === curEngine().id));
+  const next = list[(cur + d + list.length) % list.length];
+  searchWith = next.id === list[0].id ? null : next.id;
+  paintEngChip();
+  engChip.classList.remove('flip');
+  void engChip.offsetWidth;
+  engChip.classList.add('flip');
+  if (typed.trim()) suggest();
+}
+export function pickEngine(id) {
+  searchWith = id === E.all()[0].id ? null : id;
+  paintEngChip();
+}
+function engineMenu(anchor) {
+  const list = E.all();
+  const r = anchor.getBoundingClientRect();
+  showMenu([
+    { header: 'Search with' },
+    ...list.map((e) => ({ label: e.name, kbd: e.key || null, checked: e.id === curEngine().id, run: () => (pickEngine(e.id), q.focus()) })),
+    { sep: true },
+    { label: 'Search engines…', icon: 'settings', run: () => openInternal('settings', { section: 'search' }) },
+  ], r.left, r.bottom + 4);
+}
+// a site told us how it searches: add it, with a keyword
+on('engine', (m) => {
+  const e = E.found(m);
+  // say so the first few times, then keep quiet: most sites have a search
+  if (e && (S.memo.engineToasts || 0) < 3) {
+    S.memo.engineToasts = (S.memo.engineToasts || 0) + 1;
+    S.saveMemo();
+    toast(`Found ${e.name}’s search. Type “${e.key} ” in the address bar to use it.`, { ms: 7000, action: 'Edit', run: () => openInternal('settings', { section: 'search' }) });
+  }
+});
+
 // ------------------------------------------------------------ suggestions
 let suggItems = [], suggIndex = -1, typed = '', remote = [], remoteFor = '', sugN = 0;
 const askRemote = debounce((text) => {
-  if (!S.settings.suggestions || S.settings.engine === 'custom' || resolve(text) !== searchUrl(text)) return;
-  send('suggest', { n: ++sugN, q: text, engine: S.settings.engine });
+  const eng = curEngine();
+  if (!S.settings.suggestions || !eng.remote || resolve(text) !== searchUrl(text)) return;
+  send('suggest', { n: ++sugN, q: text, engine: eng.id });
 }, 120);
 on('suggest', (m) => {
   if (m.n !== sugN || document.activeElement !== q || typed.trim() !== m.q) return;
@@ -1065,9 +1194,10 @@ function suggest(keepRemote) {
   // the inline completion wins when there is one
   const shown = q.value.trim();
   const target = resolve(shown !== text && q.selectionStart !== q.selectionEnd ? shown : text);
-  const isSearch = target === searchUrl(text);
+  const kw = E.keyword(text);
+  const isSearch = !!kw || target === searchUrl(text);
   const items = [isSearch
-    ? { kind: 'search', url: target, title: text, sub: `Search ${S.engine().name}` }
+    ? { kind: 'search', url: target, title: kw ? kw.query : text, typed: kw ? text : null, sub: `Search ${(kw?.engine || curEngine()).name}` }
     : { kind: 'go', url: target, title: target, sub: 'Go to address' }];
   const seen = new Set([target]);
   const match = (e) => (e.url || '').toLowerCase().includes(low) || (e.title || '').toLowerCase().includes(low);
@@ -1091,21 +1221,26 @@ function suggest(keepRemote) {
   items.push(...histItems.splice(0, Math.max(0, 6 - items.length)));
   for (const s of remote) {
     if (items.filter((x) => x.kind === 'remote').length >= 4) break;
-    if (s.toLowerCase() !== low) items.push({ kind: 'remote', url: searchUrl(s), title: s, sub: S.engine().name });
+    if (s.toLowerCase() !== low) items.push({ kind: 'remote', url: searchUrl(s), title: s, sub: curEngine().name });
   }
   items.push(...histItems.splice(0, Math.max(0, 10 - items.length)));
   suggItems = items;
   suggIndex = -1;
   paintSugg();
-  sugg.hidden = false;
-  holdOverlay('sugg', true);
+  const sl = startLive();
+  sugg.hidden = !!sl;
+  holdOverlay('sugg', !sl);
+  startLiveRefresh();
+  if (sl) askInstant(text);
 }
 const KIND = { bookmark: 'bookmark', history: 'visited', search: 'search', go: 'address', remote: 'search', tab: 'switch to tab' };
 function paintSugg() {
-  sugg.replaceChildren(...suggItems.map((it, i) => h('div', {
+  // on the start page the suggestions fill the page itself (see startLiveRefresh), elsewhere they drop down from the address bar
+  const into = startLive()?.live.querySelector('.live-rows') || sugg;
+  into.replaceChildren(...suggItems.map((it, i) => h('div', {
     class: 'sg' + (i === suggIndex ? ' hi' : '') + ' k-' + it.kind,
     onmousedown: (e) => (e.preventDefault(), (suggIndex = i), submit(e.button === 1)),
-    onmouseenter: () => ((suggIndex = i), sugg.querySelectorAll('.sg').forEach((el, j) => el.classList.toggle('hi', j === i))),
+    onmouseenter: () => ((suggIndex = i), into.querySelectorAll('.sg').forEach((el, j) => el.classList.toggle('hi', j === i))),
   },
   h('span', { class: 'sg-ic' }, it.kind === 'search' || it.kind === 'remote' ? h('i', { html: icon('search', 15) }) : it.kind === 'go' ? h('i', { html: icon('go', 15) }) : it.kind === 'tab' ? h('i', { html: icon('tab', 15) }) : favicon(it.icon, 15)),
   h('span', { class: 'sg-n' }, it.title),
@@ -1117,7 +1252,7 @@ function moveSugg(d) {
   paintSugg();
   const it = suggItems[suggIndex];
   if (!it) q.value = typed;
-  else if (it.kind === 'search' || it.kind === 'remote') q.value = it.title;
+  else if (it.kind === 'search' || it.kind === 'remote') q.value = it.typed || it.title;
   else q.value = it.url;
 }
 function hideSugg() {
@@ -1125,6 +1260,141 @@ function hideSugg() {
   suggItems = [];
   suggIndex = -1;
   holdOverlay('sugg', false);
+  startLiveRefresh();
+}
+
+// ------------------------------------------------------------ the start page while you type
+/**
+ * Typing on the start page glides the search box up into the address bar, and the page shows what the search would
+ * find (suggestions, an instant answer, a sum) while you go on typing there.
+ */
+let startRef = null, instN = 0, liveAnswer = null, liveTimer = 0;
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const startLive = () => (startRef?.el.isConnected && !field.hidden && active()?.url === 'roamer:start' ? startRef : null);
+const askInstant = debounce((text) => {
+  if (!S.settings.instant || text.length < 3 || E.keyword(text) || /^(https?:|www\.)|^\S+\.\S{2,}$/i.test(text)) return;
+  send('instant', { n: ++instN, q: text });
+}, 260);
+on('instant', (m) => {
+  if (m.n !== instN) return;
+  liveAnswer = m.answer ? { q: m.q, ...m.answer } : null;
+  startLiveRefresh();
+});
+/** A sum typed into the search box, worked out here (no eval): + - * / ^ % and brackets. */
+function calc(text) {
+  const src = text.replace(/[×x]/gi, '*').replace(/÷/g, '/').replace(/,/g, '').trim();
+  if (!/^[\d\s.+\-*/^%()]+$/.test(src) || !/\d\s*[+\-*/^%]\s*[\d(.]/.test(src)) return null;
+  const tok = src.match(/\d*\.?\d+|[+\-*/^%()]/g) || [];
+  let i = 0;
+  const atom = () => {
+    const c = tok[i++];
+    if (c === '-') return -atom();
+    if (c === '+') return atom();
+    if (c === '(') {
+      const v = add();
+      if (tok[i++] !== ')') throw 0;
+      return v;
+    }
+    if (c === undefined || !/^[\d.]/.test(c)) throw 0;
+    return parseFloat(c);
+  };
+  const pow = () => {
+    const b = atom();
+    return tok[i] === '^' ? (i++, b ** pow()) : b;
+  };
+  const post = () => {
+    let v = pow();
+    while (tok[i] === '%') i++, (v /= 100);
+    return v;
+  };
+  const mul = () => {
+    let v = post();
+    while (tok[i] === '*' || tok[i] === '/') v = tok[i++] === '*' ? v * post() : v / post();
+    return v;
+  };
+  const add = () => {
+    let v = mul();
+    while (tok[i] === '+' || tok[i] === '-') v = tok[i++] === '+' ? v + mul() : v - mul();
+    return v;
+  };
+  try {
+    const v = add();
+    return i === tok.length && Number.isFinite(v) ? +v.toPrecision(12) : null;
+  } catch {
+    return null;
+  }
+}
+function startLiveRefresh() {
+  const sl = startLive();
+  if (!sl) {
+    if (startRef?.el.isConnected) startRef.el.classList.remove('searching', 'leaving');
+    return;
+  }
+  const text = typed.trim();
+  const on = document.activeElement === q && field.classList.contains('edited') && !!text;
+  clearTimeout(liveTimer);
+  const { el, live } = sl;
+  if (!on) {
+    live.hidden = true;
+    el.classList.remove('leaving');
+    liveTimer = setTimeout(() => el.classList.remove('searching'), 0);
+    return;
+  }
+  if (!el.classList.contains('searching')) {
+    el.classList.add('leaving');
+    const go_ = () => (el.classList.add('searching'), (live.hidden = false));
+    if (reduceMotion.matches) go_();
+    else liveTimer = setTimeout(go_, 230);
+  } else live.hidden = false;
+  // the card above the rows: a sum, or DuckDuckGo's instant answer
+  const card = live.querySelector('.live-card');
+  const sum = calc(text);
+  const a = liveAnswer && liveAnswer.q === text ? liveAnswer : null;
+  card.hidden = sum == null && !a;
+  if (sum != null) {
+    card.className = 'live-card cut sum';
+    card.replaceChildren(h('span', { class: 'lc-kick' }, 'Calculator'), h('b', { class: 'lc-big' }, '= ' + sum.toLocaleString(undefined, { maximumFractionDigits: 10 })), h('span', { class: 'lc-sub' }, text));
+  } else if (a) {
+    card.className = 'live-card cut' + (a.image ? ' has-img' : '');
+    card.replaceChildren(
+      a.image ? h('img', { class: 'lc-img', src: a.image, alt: '', referrerpolicy: 'no-referrer', draggable: 'false', onerror: (e) => e.target.remove() }) : null,
+      h('div', { class: 'lc-body' },
+        h('span', { class: 'lc-kick' }, 'Instant answer' + (a.source ? ' · ' + a.source : '')),
+        a.heading && !a.answer ? h('b', { class: 'lc-head' }, a.heading) : null,
+        a.answer ? h('b', { class: 'lc-big' }, a.answer) : null,
+        a.text ? h('p', { class: 'lc-text' }, a.text) : null,
+        a.url ? h('a', { class: 'lc-open', href: a.url, onclick: (e) => (e.preventDefault(), open(a.url, { newTab: e.ctrlKey })) }, 'Read more ›') : null,
+        a.related?.length ? h('div', { class: 'lc-rel' }, ...a.related.slice(0, 3).map((r) => h('button', { class: 'chip', title: r.text, onmousedown: (e) => e.preventDefault(), onclick: () => r.url && open(r.url, { newTab: false }) }, r.text.slice(0, 48)))) : null));
+  }
+}
+
+/** A copy of the start page's search box flies up to the address bar, which takes over the typing. */
+function glide(from, text) {
+  const sl = startRef;
+  focusAddress(text);
+  if (!sl || !from.isConnected || reduceMotion.matches || !S.settings.glide) return;
+  const a = from.getBoundingClientRect(), b = field.getBoundingClientRect();
+  const ghost = h('div', { class: 'field cut glide-ghost' }, h('i', { class: 'f-ic', html: icon('search', 18) }), h('span', { class: 'gt' }, text));
+  Object.assign(ghost.style, { left: a.left + 'px', top: a.top + 'px', width: a.width + 'px', height: a.height + 'px' });
+  document.body.append(ghost);
+  from.classList.add('gone');
+  field.classList.add('landing');
+  const gt = ghost.querySelector('.gt');
+  const mirror = () => (gt.textContent = q.value);
+  q.addEventListener('input', mirror);
+  const fin = () => {
+    q.removeEventListener('input', mirror);
+    ghost.remove();
+    field.classList.remove('landing');
+    field.classList.add('landed');
+    setTimeout(() => field.classList.remove('landed'), 700);
+    setTimeout(() => from.classList.remove('gone'), 300);
+  };
+  const move = ghost.animate([
+    { left: a.left + 'px', top: a.top + 'px', width: a.width + 'px', height: a.height + 'px', fontSize: '16px', transform: 'scale(1)' },
+    { left: b.left + 'px', top: b.top + 'px', width: b.width + 'px', height: b.height + 'px', fontSize: '12.5px', transform: 'scale(1)' },
+  ], { duration: 780, easing: 'cubic-bezier(.3,.85,.2,1)', fill: 'forwards' });
+  move.onfinish = move.oncancel = fin;
 }
 
 export function focusAddress(text) {
@@ -1314,39 +1584,85 @@ function siteZoom(t) {
 }
 
 // ------------------------------------------------------------ a site's look (the Site Theming SDK)
-let lookNow = '';
-/** The look the focused tab's site asked for, if the user lets it have one. */
-function lookFor(t) {
-  if (!t || !isWeb(t) || !t.look) return null;
-  let origin = '';
-  try {
-    origin = new URL(t.url).origin;
-  } catch {
-    return null;
-  }
-  if (t.look.origin !== origin) return null;
+let lookNow = '', booted = false;
+/** What this site's look would be, if the user lets it have one: the SDK theme, or just its theme-color. */
+function allowedLook(origin, look) {
   const pref = S.settings.siteThemes, choice = S.themeSites[origin];
-  if (t.look.sdk && pref !== 'off' && choice !== 'block' && (pref === 'on' || choice === 'allow')) return t.look.sdk;
-  if (t.look.color && S.settings.themeColor) return { background: t.look.color };
+  if (look.sdk && pref !== 'off' && choice !== 'block' && (pref === 'on' || choice === 'allow')) return look.sdk;
+  if (look.color && S.settings.themeColor) return { background: look.color };
   return null;
 }
+const originOf = (url) => {
+  try {
+    const u = new URL(url);
+    // a local file has no origin of its own; its choices belong to that one file
+    return u.protocol === 'file:' ? u.origin === 'null' ? u.protocol + '//' + u.pathname : u.origin : u.origin;
+  } catch {
+    return '';
+  }
+};
+/** The look the tab's site asked for, if the user lets it have one. */
+function lookFor(t) {
+  if (!t || !isWeb(t) || !t.look) return null;
+  const origin = originOf(t.url);
+  return origin && t.look.origin === origin ? allowedLook(origin, t.look) : null;
+}
+/** lookFor, or the look this site had last time (so restored and loading tabs already wear it). */
+function tabTheme(t) {
+  if (!t || !isWeb(t)) return null;
+  const own = lookFor(t);
+  if (own || t.look) return own;
+  const origin = originOf(t.url);
+  const c = origin && S.memo.looks?.[origin];
+  return c ? allowedLook(origin, c) : null;
+}
 const repaintTopo = debounce(() => paintTopo(), 120);
-function siteLook(force) {
-  const theme = pageFs != null ? null : lookFor(active());
+/**
+ * Dress the browser in the focused tab's look. `from` says it should spread out: true from the active tab, or an
+ * element to spread from (the look chip, say).
+ */
+function siteLook(force, from) {
+  const theme = pageFs != null ? null : tabTheme(active());
   const key = JSON.stringify(theme);
   root.classList.toggle('framed', theme?.frame ?? !!S.settings.frame);
   if (key === lookNow && !force) return;
   lookNow = key;
-  Look.apply(root, theme);
-  repaintTopo();
-  requestAnimationFrame(layout);
+  const run = () => {
+    Look.apply(root, theme);
+    repaintTopo();
+    requestAnimationFrame(layout);
+  };
+  if (from && booted && S.settings.unfurl && !reduceMotion.matches) unfurl(run, from instanceof Element ? from : null);
+  else run();
+}
+/** The new look starts at the tab and spreads out over the rest of the browser. */
+function unfurl(run, el) {
+  const r = (el || tabsEl.querySelector('.tab-i.on'))?.getBoundingClientRect();
+  const x = r ? r.left + r.width / 2 : innerWidth / 2, y = r ? r.top + r.height / 2 : 16;
+  const rad = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+  if (document.startViewTransition) {
+    try {
+      root.classList.add('unfurling');
+      const vt = document.startViewTransition(run);
+      vt.ready.then(() => root.animate({ clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${rad}px at ${x}px ${y}px)`] },
+        { duration: 900, easing: 'cubic-bezier(.22,.8,.25,1)', pseudoElement: '::view-transition-new(root)' })).catch(() => {});
+      vt.finished.finally(() => root.classList.remove('unfurling'));
+      return;
+    } catch {
+      root.classList.remove('unfurling');
+    }
+  }
+  run();
+  const ring = h('i', { class: 'unfurl-ring', style: { left: x + 'px', top: y + 'px', '--r': rad * 2 + 'px' } });
+  document.body.append(ring);
+  ring.addEventListener('animationend', () => ring.remove());
 }
 function paintLookChip() {
   const t = active();
   const sdk = t && isWeb(t) && t.look?.sdk;
   let origin = '';
   try {
-    origin = new URL(t?.url).origin;
+    origin = originOf(t?.url);
   } catch { /* not a web page */ }
   const choice = S.themeSites[origin];
   const on = !!lookFor(t) && !!sdk;
@@ -1358,7 +1674,7 @@ function paintLookChip() {
 function lookOffer() {
   const t = active();
   if (!t?.look?.sdk) return;
-  const origin = new URL(t.url).origin;
+  const origin = originOf(t.url);
   const choice = S.themeSites[origin];
   const sw = Look.swatches(t.look.sdk);
   popover(h('div', { class: 'look-offer' },
@@ -1367,24 +1683,35 @@ function lookOffer() {
     h('p', {}, h('b', {}, hostOf(t.url)), ' would like to dress Web Roamer while you’re on it: ', Look.describe(t.look.sdk) || 'its own colours', '.'),
     h('p', { class: 'lo-fine' }, 'Only colours and a few styles. Sites can’t change the address bar, the security icon or anything outside their own tab.'),
     h('div', { class: 'dlg-actions' },
-      h('button', { class: 'btn', onclick: () => (S.setThemeSite(origin, 'block'), closePopover(), siteLook(true), paintBar()) }, choice === 'block' ? 'Keep it off' : 'No thanks'),
-      h('button', { class: 'btn primary', onclick: () => (S.setThemeSite(origin, 'allow'), closePopover(), siteLook(true), paintBar()) }, choice === 'allow' ? 'Keep it on' : 'Use this look')),
+      h('button', { class: 'btn', onclick: () => (S.setThemeSite(origin, 'block'), closePopover(), siteLook(true, true), paintBar()) }, choice === 'block' ? 'Keep it off' : 'No thanks'),
+      h('button', { class: 'btn primary', onclick: () => (S.setThemeSite(origin, 'allow'), closePopover(), siteLook(true, lookChip), paintBar()) }, choice === 'allow' ? 'Keep it on' : 'Use this look')),
     h('button', { class: 'lo-more', onclick: () => (closePopover(), open(DOCS_THEMING, { newTab: true })) }, 'For web developers: the Site Theming SDK →')),
   { anchor: lookChip, align: 'right', cls: 'pv-look' });
 }
+const rememberLook = (origin, look) => {
+  const all = (S.memo.looks ||= {});
+  if (look) all[origin] = look;
+  else delete all[origin];
+  const keys = Object.keys(all);
+  if (keys.length > 60) for (const k of keys.slice(0, keys.length - 60)) delete all[k];
+  S.saveMemo();
+};
 on('sitetheme', (m) => {
   const t = byId(m.id);
   if (!t || !t.live) return;
   let origin = '';
   try {
-    origin = new URL(m.url || t.url).origin;
+    origin = originOf(m.url || t.url);
   } catch {
     return;
   }
+  if (!origin) return;
   const sdk = Look.sanitize(m.theme?.sdk);
   const color = Look.rgbOf(m.theme?.color) ? String(m.theme.color) : '';
   t.look = sdk || color ? { sdk, color, origin } : null;
-  if (t.id === activeId) siteLook(), paintBar();
+  rememberLook(origin, t.look);
+  if (t.id === activeId) siteLook(false, true), paintBar();
+  paintTabs();
 });
 
 // ------------------------------------------------------------ view source
@@ -1769,7 +2096,7 @@ S.onChange((what) => {
     requestAnimationFrame(layout);
     think();
   }
-  if (what === 'themesites') siteLook(true);
+  if (what === 'themesites') siteLook(true, true), paintTabs();
   if (what === 'bookmarks' || what === 'settings' || what === 'themesites' || what === 'zoom') paintBookmarksBar(), paintBar();
   if (what === 'downloads') paintDownloads();
   // the open internal pages follow their data
@@ -1787,6 +2114,12 @@ export const api = {
     const o = pageOpts;
     pageOpts = null;
     return o;
+  },
+  reopen: reopenAll, registerStart: (r) => (startRef = r), glide, engine: curEngine, engineMenu,
+  cycleEngine: (d) => {
+    const list = E.all();
+    const cur = Math.max(0, list.findIndex((e) => e.id === curEngine().id));
+    pickEngine(list[(cur + d + list.length) % list.length].id);
   },
   updateReady, update: () => S.memo.update, upd: () => upd, getUpdate, canSelfUpdate, docsTheming: DOCS_THEMING, repo: REPO,
   forgetSuggestions: () => (dismissed.clear(), (S.memo.dismissed = []), S.saveMemo(), think()),
@@ -1817,6 +2150,7 @@ activeId ??= tabs[0].id;
 send('ready');
 requestAnimationFrame(() => {
   present(!isInternal(active().url));
+  booted = true;
   for (const t of tabs) if (t.muted && t.live) send('mute', { id: t.id, on: true });
   if (active().url === 'roamer:start') $('#inner .start-q')?.focus();
 });
