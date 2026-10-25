@@ -72,4 +72,5 @@ export function icon(name, size = 18, cls = '') {
 }
 
 /** The Board Roamer mark (square + needle), as the Web Roamer brand. */
-export const MARK = '<rect x="3" y="3" width="34" height="34" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="20" cy="20" r="10" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".55"/><path d="M20 8 25 20 20 32 15 20z" fill="var(--accent)"/>';
+/** Web Roamer's glyph: a chamfered window with a small globe, and a dot roaming around it (see .wr-mark in style.css). */
+export const MARK = '<path class="wm-frame" d="M11 3H37V29L29 37H3V11Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="miter"/><g class="wm-globe"><circle cx="20" cy="20" r="9" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".6"/><path d="M11 20H29" stroke="currentColor" stroke-width="1.3" opacity=".4"/><ellipse class="wm-mer" cx="20" cy="20" rx="9" ry="9" fill="none" stroke="currentColor" stroke-width="1.4" opacity=".7"/></g><g class="wm-orbit"><circle cx="20" cy="6.2" r="2.7" fill="var(--accent)"/></g>';

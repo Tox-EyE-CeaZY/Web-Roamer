@@ -1,6 +1,6 @@
 [package]
 name = "web-roamer"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "A stylish little web browser in the Board Roamer style"
 
@@ -18,11 +18,17 @@ gtk = "0.18"
 webkit2gtk = { version = "2.0", features = ["v2_40"] }
 soup3 = "0.5"
 
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 muda = "0.17"
 
 [build-dependencies]
 winresource = "0.1"
+
+[patch.crates-io]
+wry = { path = "vendor/wry" }
 
 [profile.release]
 opt-level = 3

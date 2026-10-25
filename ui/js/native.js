@@ -67,6 +67,12 @@ function fake(t, d) {
     case 'reload':
       frames.get(d.id)?.setAttribute('src', frames.get(d.id).src);
       break;
+    case 'instant':
+      setTimeout(() => emit({ t: 'instant', n: d.n, q: d.q, answer: { heading: d.q, text: 'A stand-in answer for “' + d.q + '”, since there is no native side here to ask.', source: 'Dev', url: 'https://example.com/', answer: '', image: '', related: [{ text: 'Related thing', url: 'https://example.com/r' }] } }), 120);
+      break;
+    case 'boardroamer':
+      setTimeout(() => emit({ t: 'boardresult', url: d.url, ok: false, why: 'missing' }), 100);
+      break;
     case 'win':
       if (d.c === 'fs') document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.();
       break;

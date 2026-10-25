@@ -3,6 +3,7 @@ import { icon, MARK } from './icons.js';
 import { favicon, dialog, toast, showMenu } from './ui.js';
 import * as S from './store.js';
 import { settingsPage } from './settings.js';
+import { searchQuery } from './groups.js';
 
 /** The browser's own pages (roamer:<name>). The chrome draws them in the page area; no web view is involved. */
 export const INTERNAL = {
@@ -12,6 +13,7 @@ export const INTERNAL = {
   downloads: { title: 'Downloads', icon: 'download', build: downloadsPage },
   settings: { title: 'Settings', icon: 'settings', build: settingsPage },
   source: { title: 'Source', icon: 'code', build: sourcePage },
+  blank: { title: 'New tab', icon: 'tab', build: () => ({ el: h('div', { class: 'blank-page' }) }) },
 };
 
 /**
@@ -49,16 +51,27 @@ const linkProps = (api, url) => ({
 
 // ------------------------------------------------------------ start
 function start(api) {
-  const q = h('input', { class: 'start-q', placeholder: `Search ${S.engine().name} or type an address`, spellcheck: 'false', autocomplete: 'off' });
+  const q = h('input', { class: 'start-q', spellcheck: 'false', autocomplete: 'off' });
+  const engChip = h('button', { class: 'start-eng', title: 'Search with… (scroll to switch)', onclick: (e) => api.engineMenu(e.currentTarget) });
+  const paintEng = () => {
+    const e = api.engine();
+    q.placeholder = `Search ${e.name} or type an address`;
+    engChip.replaceChildren(h('span', {}, e.name), e.key ? h('kbd', {}, e.key) : null);
+  };
+  paintEng();
   q.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && q.value.trim()) api.open(api.resolve(q.value), { newTab: e.altKey });
+    if (e.key === 'Enter' && q.value.trim()) api.open(api.resolve(q.value), { newTab: e.altKey, typed: true });
   });
-  // typing hands over to the address bar, which has the suggestions
+  // the first keys glide the search up into the address bar, which carries on from there
   q.addEventListener('input', () => {
     const v = q.value;
     q.value = '';
-    api.focusAddress(v);
+    api.glide(fieldEl, v);
   });
+  const fieldEl = h('div', { class: 'field cut start-field' }, h('i', { class: 'f-ic', html: icon('search', 20) }), q, engChip,
+    h('button', { class: 'go', title: 'Go', onclick: () => q.value.trim() && api.open(api.resolve(q.value), { typed: true }), html: icon('go', 18) }));
+  fieldEl.addEventListener('wheel', (e) => (e.preventDefault(), api.cycleEngine(e.deltaY > 0 ? 1 : -1), paintEng()), { passive: false });
+  const live = h('div', { class: 'start-live', hidden: true }, h('div', { class: 'live-card', hidden: true }), h('div', { class: 'live-rows' }));
   const now = new Date();
   const hour = now.getHours();
   const greet = hour < 5 ? 'Night roaming' : hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening';
@@ -117,25 +130,102 @@ function start(api) {
       h('div', {},
         h('span', { class: 'pg-kick' }, 'WEB', h('i', {}, '/'), 'ROAMER', h('em', {}, ' · ', now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }))),
         h('h1', { class: 'start-h' }, `${greet}. Where to?`))),
-    h('div', { class: 'field cut start-field' }, h('i', { class: 'f-ic', html: icon('search', 20) }), q,
-      h('button', { class: 'go', title: 'Go', onclick: () => q.value.trim() && api.open(api.resolve(q.value)), html: icon('go', 18) })),
+    fieldEl,
+    live,
     tilesWrap,
     groupsWrap,
     recentWrap,
     h('button', { class: 'start-custom', title: 'Customize the start page', onclick: () => api.openInternal('settings', { section: 'start' }), html: icon('edit', 14) + '<span>Customize</span>' }));
   paint();
+  api.registerStart({ el, field: fieldEl, live });
   setTimeout(() => q.isConnected && document.activeElement?.tagName !== 'INPUT' && q.focus(), 0);
-  return { el, update: (w) => ['bookmarks', 'history', 'settings', 'groups'].includes(w) && paint() };
+  return { el, update: (w) => (['bookmarks', 'history', 'settings', 'groups'].includes(w) && paint(), w === 'settings' && paintEng()) };
 }
 
 // ------------------------------------------------------------ history
+/**
+ * The trail: what you looked at, as journeys along a path. Visits close together in time make one journey; a run of
+ * pages on one site is one stop. A journey can be opened again, all at once, as a tab group.
+ */
+const GAP = 25 * 60 * 1000;
+function journeysOf(items) {
+  const out = [];
+  let cur = null;
+  for (const e of items) {
+    if (!cur || cur.start - e.t > GAP) out.push((cur = { entries: [], end: e.t, start: e.t }));
+    cur.entries.push(e);
+    cur.start = e.t;
+  }
+  for (const j of out) {
+    // oldest first reads as a path; one stop per run of pages on the same site
+    const path = [...j.entries].reverse();
+    j.stops = [];
+    for (const e of path) {
+      const last = j.stops[j.stops.length - 1];
+      if (last && host(last.entries[0].url) === host(e.url)) last.entries.push(e);
+      else j.stops.push({ host: host(e.url), entries: [e] });
+    }
+    j.searches = [...new Set(path.map((e) => searchQuery(e.url)).filter(Boolean))].slice(0, 4);
+  }
+  return out;
+}
+function trailNodes(api, items, rowMenu, repaint) {
+  if (!items.length) return [h('p', { class: 'empty-note' }, 'No trail yet. Go roam.')];
+  const out = [];
+  let day = '';
+  for (const j of journeysOf(items.slice(0, 600))) {
+    const d = dayLabel(j.end);
+    if (d !== day) out.push(h('div', { class: 'tr-day' }, h('span', {}, (day = d))));
+    const first = j.stops[0];
+    const hue = Math.round(hash01(first.host) * 360);
+    const open_ = { v: false };
+    const body = h('div', { class: 'tr-stops' });
+    const paintStops = () => {
+      const all = j.stops;
+      const shown = open_.v ? all : all.slice(0, 6);
+      body.replaceChildren(
+        ...shown.map((st, i) => {
+          const e = st.entries[st.entries.length - 1]; // the page you ended up on
+          const n = st.entries.length;
+          return h('a', { class: 'tr-stop', title: e.url, ...linkProps(api, e.url), oncontextmenu: (ev) => (ev.preventDefault(), rowMenu(e, ev)) },
+            h('i', { class: 'tr-dot' }),
+            h('span', { class: 'tr-ic' }, favicon(e.icon, 15)),
+            h('span', { class: 'tr-t' }, e.title || e.url),
+            h('span', { class: 'tr-h' }, st.host + (n > 1 ? ` · ${n} pages` : '')),
+            h('span', { class: 'tr-at' }, clock(st.entries[0].t)));
+        }),
+        all.length > 6 ? h('button', { class: 'tr-more', onclick: (ev) => (ev.stopPropagation(), (open_.v = !open_.v), paintStops()) }, open_.v ? 'Show less' : `${all.length - 6} more stops`) : null);
+    };
+    paintStops();
+    const span = j.end - j.start;
+    out.push(h('div', { class: 'tr-node', style: { '--ph': hue } },
+      h('i', { class: 'tr-pin' }),
+      h('div', { class: 'tr-card cut' },
+        h('div', { class: 'tr-top' },
+          h('span', { class: 'prov' }, first.host.replace(/^www\./, '').split('.').slice(-2, -1)[0] || first.host),
+          h('span', { class: 'tr-time' }, `${clock(j.start)}${span > 60000 ? ' – ' + clock(j.end) : ''} · ${j.stops.length} stop${j.stops.length === 1 ? '' : 's'} · ${ago(j.end)}`)),
+        j.searches.length ? h('div', { class: 'tr-chips' }, ...j.searches.map((q) => h('span', { class: 'mini op-inc' }, q))) : null,
+        body,
+        h('div', { class: 'tr-act' },
+          j.stops.length > 1 ? h('button', { title: 'Open this journey again as a tab group', html: icon('group', 15), onclick: () => api.reopen(j.stops.map((s) => s.entries[s.entries.length - 1].url), j.searches[0] || first.host) }) : null,
+          h('button', { title: 'Forget this journey', html: icon('close', 15), onclick: () => (S.removeVisits((x) => j.entries.includes(x)), repaint()) })))));
+  }
+  return out;
+}
+
 function historyPage(api) {
   let filter = (api.opts?.filter || '').toLowerCase();
   const list = h('div', { class: 'hist' });
   const count = h('span');
+  const modeSeg = h('div', { class: 'seg hist-mode' });
   const paint = () => {
     const items = filter ? S.history.filter((e) => (e.title || '').toLowerCase().includes(filter) || e.url.toLowerCase().includes(filter)) : S.history;
     count.textContent = `${S.history.length} visit${S.history.length === 1 ? '' : 's'} kept on this computer`;
+    const trail = S.settings.historyView !== 'list';
+    list.className = trail ? 'trail' : 'hist';
+    modeSeg.replaceChildren(...[['trail', 'Trail'], ['list', 'List']].map(([v, label]) =>
+      h('button', { class: 'seg-b' + ((v === 'trail') === trail ? ' on' : ''), onclick: () => (S.setSetting('historyView', v), paint()) }, label)));
+    if (trail) return list.replaceChildren(...trailNodes(api, items, rowMenu, paint));
     const shown = items.slice(0, 400);
     const out = [];
     let day = '';
@@ -179,7 +269,7 @@ function historyPage(api) {
   const box = searchBox('Search history', (v) => ((filter = v), paint()));
   box.querySelector('input').value = filter;
   const el = h('div', { class: 'pg' },
-    head('HISTORY', 'Where you’ve been', count, box,
+    head('HISTORY', 'Where you’ve been', count, modeSeg, box,
       h('button', { class: 'btn danger', onclick: clear, html: icon('trash', 15) + '<span>Clear…</span>' })),
     list);
   paint();

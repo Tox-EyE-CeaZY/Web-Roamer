@@ -6,14 +6,23 @@
  * the browser's own pages or any other tab.
  */
 
-const KEYS = ['accent', 'background', 'surface', 'text', 'scheme', 'pattern', 'shape', 'font', 'frame'];
+const KEYS = ['accent', 'background', 'surface', 'text', 'scheme', 'pattern', 'shape', 'font', 'frame', 'tabShape', 'tabStyle', 'shadow', 'border', 'density'];
 export const PATTERNS = ['topo', 'grid', 'dots', 'lines', 'none'];
-export const SHAPES = ['chamfer', 'square'];
+export const SHAPES = ['chamfer', 'square', 'round', 'pill', 'slant'];
+export const TAB_SHAPES = [...SHAPES, 'notch'];
+export const TAB_STYLES = ['solid', 'outline', 'glow', 'underline'];
+export const SHADOWS = ['hard', 'soft', 'none'];
+export const BORDERS = ['none', 'thin', 'normal', 'thick'];
+export const DENSITIES = ['compact', 'cozy', 'roomy'];
 export const FONTS = {
   display: "'Bricolage Grotesque', 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif",
   sans: "'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif",
   serif: "Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', serif",
   mono: "'JetBrains Mono', 'Cascadia Mono', Consolas, monospace",
+  rounded: "'Nunito', 'Varela Round', 'Segoe UI Rounded', 'Arial Rounded MT Bold', 'Segoe UI', system-ui, sans-serif",
+  condensed: "'Bahnschrift SemiCondensed', 'Roboto Condensed', 'Arial Narrow', 'Segoe UI', system-ui, sans-serif",
+  slab: "'Rockwell', 'Roboto Slab', 'Courier New', Georgia, serif",
+  hand: "'Segoe Print', 'Bradley Hand', 'Chalkboard SE', 'Comic Sans MS', cursive",
 };
 
 // ------------------------------------------------------------ colours
@@ -69,8 +78,9 @@ export function sanitize(raw) {
       if (v === 'dark' || v === 'light') t[k] = v;
     } else if (k === 'pattern') {
       if (PATTERNS.includes(v)) t[k] = v;
-    } else if (k === 'shape') {
-      if (SHAPES.includes(v)) t[k] = v;
+    } else if (k === 'shape' || k === 'tabShape' || k === 'tabStyle' || k === 'shadow' || k === 'border' || k === 'density') {
+      const list = { shape: SHAPES, tabShape: TAB_SHAPES, tabStyle: TAB_STYLES, shadow: SHADOWS, border: BORDERS, density: DENSITIES }[k];
+      if (list.includes(v)) t[k] = v;
     } else if (k === 'font') {
       if (FONTS[v]) t[k] = v;
     } else if (k === 'frame') {
@@ -81,7 +91,7 @@ export function sanitize(raw) {
 }
 
 // ------------------------------------------------------------ turning a theme into the chrome's colours
-const VARS = ['--bg', '--bg2', '--bg3', '--line', '--line2', '--ink', '--dim', '--faint', '--accent', '--accent-ink', '--hot', '--topo-rgb', '--topo-op', '--shade', '--f-display'];
+const VARS = ['--f-mono', '--bg', '--bg2', '--bg3', '--line', '--line2', '--ink', '--dim', '--faint', '--accent', '--accent-ink', '--hot', '--topo-rgb', '--topo-op', '--shade', '--f-display'];
 
 /**
  * CSS custom properties for a (sanitized) theme. `base` is the browser's own accent, used when the site sets none.
@@ -125,7 +135,10 @@ export function palette(t, base) {
     out['--accent-ink'] = contrast([0, 0, 0], ac) > contrast([255, 255, 255], ac) ? '#0b0f0c' : '#ffffff';
     out['--topo-rgb'] = ac.map(Math.round).join(' ');
   }
-  if (t.font) out['--f-display'] = FONTS[t.font];
+  if (t.font) {
+    out['--f-display'] = FONTS[t.font];
+    if (t.font === 'mono') out['--f-mono'] = FONTS.mono;
+  }
   return out;
 }
 
@@ -136,6 +149,7 @@ export function apply(root, theme) {
   delete root.dataset.sitePattern;
   delete root.dataset.siteShape;
   delete root.dataset.siteFrame;
+  for (const k of ['siteShadow', 'siteBorder', 'siteDensity']) delete root.dataset[k];
   root.classList.toggle('site-look', !!theme);
   if (!theme) return;
   const base = rgbOf(getComputedStyle(root).getPropertyValue('--accent'));
@@ -145,6 +159,25 @@ export function apply(root, theme) {
   if (theme.pattern) root.dataset.sitePattern = theme.pattern;
   if (theme.shape) root.dataset.siteShape = theme.shape;
   if (theme.frame != null) root.dataset.siteFrame = theme.frame ? 'on' : 'off';
+  if (theme.shadow) root.dataset.siteShadow = theme.shadow;
+  if (theme.border) root.dataset.siteBorder = theme.border;
+  if (theme.density) root.dataset.siteDensity = theme.density;
+}
+
+/**
+ * How a tab dresses itself in its site's look, whether or not it is the one being viewed:
+ * {style: CSS custom properties, shape, tabStyle}. The tab only ever changes its own colours, shape and type.
+ */
+export function tabLook(theme, base) {
+  if (!theme) return null;
+  const p = palette(theme, base);
+  const style = {};
+  if (p['--bg3']) (style['--tb-bg'] = p['--bg3']), (style['--tb-bg2'] = p['--bg2']), (style['--tb-ink'] = p['--ink']), (style['--tb-dim'] = p['--dim']);
+  if (p['--accent']) style['--tb-acc'] = p['--accent'];
+  if (theme.font) style['--tb-font'] = FONTS[theme.font];
+  const shape = theme.tabShape || (theme.shape && theme.shape !== 'chamfer' ? theme.shape : '');
+  if (!Object.keys(style).length && !shape && !theme.tabStyle) return null;
+  return { style, shape, tabStyle: theme.tabStyle || '' };
 }
 
 /** A short description of a theme, for the "this site has a look" offer. */
@@ -154,7 +187,8 @@ export function describe(t) {
   if (t.accent) bits.push('accent colour');
   if (t.pattern && t.pattern !== 'topo') bits.push(t.pattern === 'none' ? 'no pattern' : t.pattern + ' pattern');
   if (t.font && t.font !== 'display') bits.push(t.font + ' type');
-  if (t.shape === 'square') bits.push('square corners');
+  if (t.shape && t.shape !== 'chamfer') bits.push(t.shape + ' shapes');
+  if (t.tabShape || t.tabStyle) bits.push('its own tab');
   return bits.join(' · ');
 }
 
