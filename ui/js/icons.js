@@ -1,0 +1,56 @@
+// Hand-drawn icon set (same hand as Board Roamer): 24px grid, square caps + miter joins to match the angular UI.
+const P = {
+  back: '<path d="M20 12H5M11 6l-6 6 6 6"/>',
+  forward: '<path d="M4 12h15M13 6l6 6-6 6"/>',
+  reload: '<path d="M20 12a8 8 0 1 1-2.500-5.800M20 4v5h-5"/>',
+  home: '<path d="M3 11 12 4l9 7M6 9.500V20h12V9.500M10 20v-6h4v6"/>',
+  search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/>',
+  go: '<path d="M4 12h15M13 6l6 6-6 6"/>',
+  close: '<path d="M5 5l14 14M19 5 5 19"/>',
+  plus: '<path d="M12 4v16M4 12h16"/>',
+  minus: '<path d="M4 12h16"/>',
+  check: '<path d="m4 12.5 5 5L20 6.5"/>',
+  up: '<path d="M12 20V5M5 11l7-7 7 7"/>',
+  down: '<path d="M12 4v15M5 13l7 7 7-7"/>',
+  left: '<path d="M15 4 7 12l8 8"/>',
+  right: '<path d="m9 4 8 8-8 8"/>',
+  lock: '<rect x="5" y="10" width="14" height="10"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+  unlock: '<rect x="5" y="10" width="14" height="10"/><path d="M8 10V7a4 4 0 0 1 7.500-2"/><path d="M12 14v2"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/>',
+  star: '<path d="m12 3 2.800 5.700 6.200.9-4.500 4.400 1.100 6.200L12 17.200 6.400 20.200l1.100-6.200L3 9.600l6.200-.9z"/>',
+  starOn: '<path d="m12 3 2.800 5.700 6.200.9-4.500 4.400 1.100 6.200L12 17.200 6.400 20.200l1.100-6.200L3 9.600l6.200-.9z" fill="currentColor"/>',
+  bookmarks: '<path d="M6 3h12v18l-6-5-6 5z"/>',
+  history: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.500 2"/>',
+  download: '<path d="M12 3v12M6 10l6 6 6-6M4 20h16"/>',
+  more: '<circle cx="5" cy="12" r="1.500" fill="currentColor"/><circle cx="12" cy="12" r="1.500" fill="currentColor"/><circle cx="19" cy="12" r="1.500" fill="currentColor"/>',
+  settings: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
+  trash: '<path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16zM13 7l4 4"/>',
+  copy: '<rect x="8" y="8" width="12" height="12"/><path d="M16 8V4H4v12h4"/>',
+  external: '<path d="M14 4h6v6M20 4 10 14M18 14v6H4V6h6"/>',
+  folder: '<path d="M3 5h7l2 3h9v11H3z"/>',
+  file: '<path d="M6 3h8l4 4v14H6zM14 3v4h4"/>',
+  tab: '<path d="M3 6h7l2 3h9v11H3z"/><path d="M12 13v4M10 15h4"/>',
+  restore: '<path d="M4 11V9a3 3 0 0 1 3-3h11M15 3l3 3-3 3"/><path d="M20 13v2a3 3 0 0 1-3 3H6M9 21l-3-3 3-3"/>',
+  zoomIn: '<circle cx="10.500" cy="10.500" r="6.500"/><path d="m15.500 15.500 5 5M10.500 8v5M8 10.500h5"/>',
+  zoomOut: '<circle cx="10.500" cy="10.500" r="6.500"/><path d="m15.500 15.500 5 5M8 10.500h5"/>',
+  find: '<path d="M4 5h10M4 10h6M4 15h5"/><circle cx="15.500" cy="14.500" r="4"/><path d="m18.500 17.500 3 3"/>',
+  print: '<path d="M7 9V3h10v6M7 17H3V9h18v8h-4"/><path d="M7 14h10v7H7z"/>',
+  code: '<path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/>',
+  fullscreen: '<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/>',
+  compass: '<circle cx="12" cy="12" r="9"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><path d="m15.500 8.500-2 5-5 2 2-5z"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v1"/>',
+  link: '<path d="M10 14a4 4 0 0 0 5.700 0l3.500-3.500a4 4 0 0 0-5.700-5.700L12 6.300M14 10a4 4 0 0 0-5.700 0l-3.500 3.500a4 4 0 0 0 5.700 5.700L12 17.700"/>',
+  eye: '<path d="M3 12s3.500-6 9-6 9 6 9 6-3.500 6-9 6-9-6-9-6z"/><circle cx="12" cy="12" r="2.500"/>',
+  sparkle: '<path d="M12 3l2 7 7 2-7 2-2 7-2-7-7-2 7-2z"/>',
+  winMin: '<path d="M5 12h14"/>',
+  winMax: '<rect x="6" y="6" width="12" height="12"/>',
+  winRestore: '<path d="M8 8V4h12v12h-4M4 8h12v12H4z"/>',
+};
+
+export function icon(name, size = 18, cls = '') {
+  return `<svg class="ic ${cls}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true">${P[name] || ''}</svg>`;
+}
+
+/** The Board Roamer mark (square + needle), as the Web Roamer brand. */
+export const MARK = '<rect x="3" y="3" width="34" height="34" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="20" cy="20" r="10" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".55"/><path d="M20 8 25 20 20 32 15 20z" fill="var(--accent)"/>';

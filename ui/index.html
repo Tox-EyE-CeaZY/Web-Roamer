@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Web Roamer</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' fill='%230a1113'/%3E%3Cpath d='M20 5 26 20 20 35 14 20z' fill='%23c8ff3d'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/fonts.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <canvas id="topo"></canvas>
+  <div class="grain"></div>
+
+  <div id="chrome">
+    <div id="titlebar"></div>
+    <div id="toolbar"></div>
+    <div id="progress"><i></i></div>
+    <nav id="bmbar"></nav>
+    <div id="findbar" hidden></div>
+  </div>
+
+  <main id="stage">
+    <div id="page"><div class="page-veil"><span>page tucked away while the menu is open</span></div></div>
+    <div id="inner"></div>
+  </main>
+
+  <div id="toasts"></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
